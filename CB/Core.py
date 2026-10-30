@@ -85,6 +85,7 @@ class Core:
         if not os.path.isdir('WTF-Backup') and self.config['Backup']['Enabled']:
             os.mkdir('WTF-Backup')
         self.update_config()
+        self.lock_history()
 
     def save_config(self):
         with open(self.configPath, 'w') as outfile:
@@ -243,9 +244,6 @@ class Core:
             self.config['LockHistory'] = Verify.seed_lock_history(self.config['Addons'])
         return self.config['LockHistory']
 
-    def keep_lock_history(self):
-        self.lock_history()
-
     def verify_install(self, new, url, current=None, adopt=False):
         if new.verifyWarning:
             self.notices.append(new.verifyWarning)
@@ -378,7 +376,6 @@ class Core:
 
     def del_addon(self, url, keep):
         if old := self.check_if_installed(url):
-            self.keep_lock_history()
             if not keep:
                 self.cleanup(old['Directories'])
             self.config['IgnoreClientVersion'].pop(old['URL'], None)

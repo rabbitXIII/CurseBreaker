@@ -200,23 +200,23 @@ def test_tofu_insecure_env_allows_with_notice(core, wowi, addons, monkeypatch):
     assert any('publisher replaced the file' in notice for notice in core.notices)
 
 
-def reinstall_after_republish(core, wowi, addons, url='wowi:100', files=None):
+def reinstall_after_republish(core, wowi, files=None):
     wowi(100, '1.0', {'Foo/Foo.toc': 'x'})
     core.add_addon('wowi:100', False)
     core.del_addon(WOWI, False)
     wowi(100, '1.0', files or {'Foo/Foo.toc': 'replaced'})
-    return core.add_addon(url, False)
+    return core.add_addon('wowi:100', False)
 
 
 def test_lock_survives_uninstall_and_refuses_replaced_file(core, wowi, addons):
     with pytest.raises(RuntimeError, match='replaced the file'):
-        reinstall_after_republish(core, wowi, addons)
+        reinstall_after_republish(core, wowi)
     assert tree(addons) == []
     assert core.config['Addons'] == []
 
 
 def test_lock_survives_uninstall_and_allows_identical_file(core, wowi, addons):
-    assert reinstall_after_republish(core, wowi, addons, files={'Foo/Foo.toc': 'x'}) == (True, 'Addon100', '1.0')
+    assert reinstall_after_republish(core, wowi, files={'Foo/Foo.toc': 'x'}) == (True, 'Addon100', '1.0')
     assert (addons / 'Foo' / 'Foo.toc').read_text() == 'x'
 
 
@@ -234,11 +234,36 @@ def test_lock_history_is_seeded_from_entries_of_an_older_config(core, wowi, addo
     wowi(100, '1.0', {'Foo/Foo.toc': 'x'})
     core.add_addon('wowi:100', False)
     del core.config['LockHistory']
+    core.save_config()
+    core.init_config()
+    assert core.config['LockHistory']
     core.del_addon(WOWI, False)
     wowi(100, '1.0', {'Foo/Foo.toc': 'replaced'})
     with pytest.raises(RuntimeError, match='replaced the file'):
         core.add_addon('wowi:100', False)
     assert tree(addons) == []
+
+
+def test_lock_matches_github_case_variants(core, github, addons):
+    github('Owner/Repo', 'v1.0', {'Repo/Repo.toc': 'x'})
+    core.add_addon('gh:Owner/Repo', False)
+    core.del_addon('https://github.com/Owner/Repo', False)
+    github('owner/repo', 'v1.0', {'Repo/Repo.toc': 'replaced'})
+    with pytest.raises(RuntimeError, match='replaced the file'):
+        core.add_addon('https://github.com/owner/repo', False)
+    assert tree(addons) == []
+
+
+def test_forced_downgrade_to_a_republished_version_refused(core, wowi, addons):
+    wowi(100, '1.0', {'Foo/Foo.toc': 'old'})
+    core.add_addon('wowi:100', False)
+    wowi(100, '2.0', {'Foo/Foo.toc': 'new'})
+    core.update_addon(WOWI, True, False)
+    wowi(100, '1.0', {'Foo/Foo.toc': 'republished'})
+    with pytest.raises(RuntimeError, match='replaced the file'):
+        core.update_addon(WOWI, True, True)
+    assert (addons / 'Foo' / 'Foo.toc').read_text() == 'new'
+    assert core.config['Addons'][0]['Version'] == '2.0'
 
 
 def test_insecure_env_overrides_the_lock_and_updates_the_history(core, wowi, addons, monkeypatch):
@@ -281,6 +306,7 @@ def test_raw_branch_archive_exempt_from_tofu(core, router, addons):
     router.add(archive, make_zip({'Raw-main/Raw/Raw.toc': 'rebuilt'}))
     core.update_addon('raw:dev', True, True)
     assert (addons / 'Raw' / 'Raw.toc').read_text() == 'rebuilt'
+    assert core.config['LockHistory'] == {'raw:dev': [['abcdef0', core.config['Addons'][0]['Lock']['SHA256']]]}
 
 
 def test_downgrade_refused_then_forced(core, wowi, addons):
