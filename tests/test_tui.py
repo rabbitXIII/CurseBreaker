@@ -143,7 +143,7 @@ def test_error_message_is_not_parsed_as_markup(tui):
 def test_help_documents_direct_github_install(tui, monkeypatch):
     monkeypatch.setattr(tui, 'parse_custom_addons', lambda: '')
     tui.c_help(None)
-    assert 'gh:[username]/[repository_name]' in output(tui)
+    assert 'installed directly with gh:[username]/[repository_name]' in output(tui)
 
 
 def test_error_message_keeps_emoji_codes_literal(tui):
@@ -214,7 +214,7 @@ def raising(error):
 
 def test_master_config_failure_prints_message_and_exits(tui, monkeypatch):
     monkeypatch.setattr(tui.core, 'init_master_config', raising(RuntimeError('offline')))
-    monkeypatch.setattr(tui, 'handle_keypress', lambda *_: None)
+    tui.headless = True
     with pytest.raises(SystemExit):
         tui.load_master_config()
     assert 'offline' in output(tui)

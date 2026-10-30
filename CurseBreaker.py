@@ -171,7 +171,7 @@ class TUI:
                 if not self.headless:
                     self.print_header()
                 try:
-                    self.motd_parser()
+                    self.show_motd()
                     self.c_update(None, True)
                     if self.core.backup_check():
                         self.setup_table()
