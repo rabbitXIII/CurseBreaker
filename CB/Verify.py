@@ -156,11 +156,24 @@ def ownership_conflicts(directories, protected, owners, previous, existing, adop
     return conflicts
 
 
-def is_downgrade(old, new):
+def release_version(tag):
+    return re.sub(r'^[vV]', '', str(tag).rsplit('/', 1)[-1], count=1)
+
+
+def comparable_version(tag):
     try:
-        return Version(new) < Version(old)
+        return Version(release_version(tag))
     except (InvalidVersion, TypeError):
-        return False
+        return None
+
+
+def first_incomparable(*tags):
+    return next((tag for tag in tags if comparable_version(tag) is None), None)
+
+
+def is_downgrade(old, new):
+    old_version, new_version = comparable_version(old), comparable_version(new)
+    return old_version is not None and new_version is not None and new_version < old_version
 
 
 def lock_mismatch(lock, version, sha256):
