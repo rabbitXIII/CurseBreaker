@@ -39,7 +39,7 @@ from prompt_toolkit.completion import WordCompleter, NestedCompleter
 from packaging.version import Version
 from CB import is_addon_directory, __version__
 from CB.Core import Core
-from CB.Verify import summarize, branch_source, Refusal
+from CB.Verify import summarize, branch_source, Refusal, BRANCH_CONFIRMATION
 from CB.Wago import WagoUpdater
 from CB.Compat import clear, set_terminal_title, set_terminal_size, KBHit
 from CB.Resources import LOGO, HEADLESS_TERMINAL_THEME
@@ -547,26 +547,33 @@ class TUI:
             payload.append(addon['Slug'])
         return ' [bold white]|[/bold white] '.join(payload)
 
-    def confirm_branch_installs(self, addons, optunverified, exceptions):
-        return [addon for addon in addons if self.allow_branch_install(addon, optunverified, exceptions)]
+    def find_branch_source(self, addon):
+        return branch_source(self.core.masterConfig['CustomRepository'], addon)
 
-    def allow_branch_install(self, addon, optunverified, exceptions):
-        source = branch_source(self.core.masterConfig['CustomRepository'], addon)
-        if not source or optunverified or self.core.check_if_installed(addon):
+    def confirm_branch_installs(self, addons, optunverified, exceptions):
+        return [addon for addon in addons if self.confirm_branch_install(addon, optunverified, exceptions)]
+
+    def confirm_branch_install(self, addon, optunverified, exceptions):
+        source = self.find_branch_source(addon)
+        if not source or self.core.check_if_installed(addon):
             return True
-        if sys.stdin.isatty():
-            return self.ask_branch_install(source)
-        exceptions.append(Refusal('branch install needs confirmation; rerun with -u to allow it.', source['Name']))
+        interactive = sys.stdin.isatty()
+        if optunverified or (interactive and self.ask_branch_install(source)):
+            return True
+        self.skip_branch_install(source, interactive, exceptions)
         return False
+
+    def skip_branch_install(self, source, interactive, exceptions):
+        if interactive:
+            self.table.add_row('[bold black]Skipped[/bold black]', Text(source['Name'], no_wrap=True),
+                               Text('unverifiable branch install', no_wrap=True))
+        else:
+            exceptions.append(Refusal(BRANCH_CONFIRMATION, source['Name']))
 
     def ask_branch_install(self, source):
-        if Confirm.ask(f'{source["Name"]} installs the "{source["Branch"]}" branch of {source["Repository"]}.\n'
-                       f'Branch archives change with every commit and publish no hash, so this download can\'t be '
-                       f'verified.\nInstall it anyway?', default=False, console=self.console):
-            return True
-        self.table.add_row('[bold black]Skipped[/bold black]', Text(source['Name'], no_wrap=True),
-                           Text('unverifiable branch install', no_wrap=True))
-        return False
+        return Confirm.ask(f'{source["Name"]} installs the "{source["Branch"]}" branch of {source["Repository"]}.\n'
+                           f'Branch archives change with every commit and publish no hash, so this download can\'t be '
+                           f'verified.\nInstall it anyway?', default=False, console=self.console)
 
     def c_install(self, args):
         if not args:
@@ -605,7 +612,8 @@ class TUI:
                 while addons and not progress.finished:
                     for addon in addons:
                         try:
-                            installed, name, version = self.core.add_addon(addon, optignore, optadopt)
+                            installed, name, version = self.core.add_addon(addon, optignore, optadopt,
+                                                                           bool(self.find_branch_source(addon)))
                             if installed:
                                 self.table.add_row('[green]Installed[/green]', Text(name, no_wrap=True),
                                                    Text(version, no_wrap=True))

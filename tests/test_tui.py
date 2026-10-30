@@ -411,3 +411,32 @@ def test_release_install_never_asks(tui, github, prompts, monkeypatch):
     tui.c_install('gh:owner/Repo')
     assert prompts == []
     assert 'Installed' in output(tui)
+
+
+def archive_requests(router):
+    return [request for request in router.requests if str(request.url) == RAW_ARCHIVE]
+
+
+def test_branch_install_with_trailing_slash_is_refused_without_tty(tui, router, raw_branch, prompts, monkeypatch):
+    set_tty(monkeypatch, False)
+    tui.c_install('raw:dev/')
+    assert 'Refused: Raw: branch install needs confirmation' in output(tui)
+    assert router.requests == []
+
+
+def test_branch_install_with_trailing_slash_declined_on_tty(tui, router, raw_branch, prompts, monkeypatch):
+    set_tty(monkeypatch, True)
+    prompts.answer(False)
+    tui.c_install('raw:dev/')
+    assert len(prompts) == 1
+    assert 'Skipped' in output(tui)
+    assert router.requests == []
+
+
+def test_unrecognised_branch_form_is_refused_by_core(tui, router, raw_branch, prompts, monkeypatch, addons):
+    set_tty(monkeypatch, True)
+    monkeypatch.setattr(tui, 'find_branch_source', lambda addon: None)
+    tui.c_install('raw:dev')
+    assert 'Refused: Raw: branch install needs confirmation' in output(tui)
+    assert archive_requests(router) == []
+    assert tree(addons) == []

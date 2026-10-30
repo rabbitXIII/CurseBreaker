@@ -258,5 +258,6 @@ def test_branch_source_misses_unknown_entry():
     assert Verify.branch_source(CUSTOM, 'other:dev') is None
 
 
-def test_branch_source_ignores_github_urls():
-    assert Verify.branch_source(CUSTOM, 'https://github.com/owner/Raw') is None
+def test_branch_source_matches_trailing_slash_like_add_addon():
+    assert Verify.branch_source(CUSTOM, 'raw:dev/') is CUSTOM['raw:dev']
+    assert Verify.branch_source(CUSTOM, 'RAW:DEV/') is CUSTOM['raw:dev']
