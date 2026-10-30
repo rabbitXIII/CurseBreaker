@@ -343,10 +343,15 @@ class Core:
         else:
             return '?', None
 
-    def parse_new_addon(self, ignore, url, adopt=False):
+    def check_branch_confirmed(self, new, branch_confirmed):
+        if isinstance(new, GitHubAddonRaw) and not branch_confirmed:
+            raise Verify.Refusal(Verify.BRANCH_CONFIRMATION, new.name)
+
+    def parse_new_addon(self, ignore, url, adopt=False, branch_confirmed=False):
         if ignore:
             self.config['IgnoreClientVersion'][url] = True
         new = self.parse_url(url)
+        self.check_branch_confirmed(new, branch_confirmed)
         if new.ignoreUpdate:
             raise RuntimeError(f'{new.name}.\nThe newest file is still awaiting approval on WoWInterface.')
         new.get_addon()
@@ -367,7 +372,7 @@ class Core:
         self.save_config()
         return True, new.name, new.currentVersion
 
-    def add_addon(self, url, ignore, adopt=False):
+    def add_addon(self, url, ignore, adopt=False, branch_confirmed=False):
         if url.endswith(':'):
             raise NotImplementedError('Provided URL is not supported.')
         elif 'wago-app://' in url:
@@ -383,7 +388,7 @@ class Core:
         if addon := self.check_if_installed(url):
             return False, addon['Name'], addon['Version']
         else:
-            return self.parse_new_addon(ignore, url, adopt)
+            return self.parse_new_addon(ignore, url, adopt, branch_confirmed)
 
     def del_addon(self, url, keep):
         if old := self.check_if_installed(url):
