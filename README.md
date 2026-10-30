@@ -21,6 +21,8 @@ cd CurseBreaker
 
 `cb.sh` runs inside `/Applications/World of Warcraft/_forever_`. For another client, set `CURSEBREAKER_WOW_DIR` (e.g. `.../_retail_`). It uses `uv` if it is installed. Otherwise it creates `.venv` with Python 3.14+ and installs the hash-pinned `requirements.lock`.
 
+Addon folders you installed by hand before are adopted with `install -a`. GitHub-hosted addons without a Forever build (WeakAuras, for example) fail with "Failed to find release for your client version", same as upstream.
+
 ### Tracking upstream
 
 ```sh
