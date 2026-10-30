@@ -107,7 +107,7 @@ def open_archive(content, name=None):
             raise RuntimeError(f'{label}Archive contains a symlink: {member.filename}')
         if member.file_size > RATIO_MIN_BYTES and member.file_size > MAX_RATIO * max(member.compress_size, 1):
             raise RuntimeError(f'{label}Archive member has a suspicious compression ratio: {member.filename}')
-        # zipfile caps each member's output at its declared file_size, so this sum bounds the real total.
+        # INVARIANT: zipfile never yields more than a member's declared file_size, so this sum bounds extraction.
         total += member.file_size
         if total > MAX_UNCOMPRESSED_BYTES:
             raise RuntimeError(f'{label}Archive exceeds the {MAX_UNCOMPRESSED_BYTES // 1024 ** 3} GiB uncompressed '
