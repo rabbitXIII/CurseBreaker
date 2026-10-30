@@ -23,6 +23,7 @@ from contextlib import nullcontext, suppress
 from rich import box
 from rich.text import Text
 from rich.rule import Rule
+from rich.markup import escape
 from rich.live import Live
 from rich.align import Align
 from rich.table import Table
@@ -36,8 +37,9 @@ from rich.traceback import Traceback, install
 from prompt_toolkit import PromptSession, HTML
 from prompt_toolkit.completion import WordCompleter, NestedCompleter
 from packaging.version import Version
-from CB import __version__
+from CB import is_addon_directory, __version__
 from CB.Core import Core
+from CB.Verify import summarize
 from CB.Wago import WagoUpdater
 from CB.Compat import clear, set_terminal_title, set_terminal_size, KBHit
 from CB.Resources import LOGO, HEADLESS_TERMINAL_THEME
@@ -249,10 +251,10 @@ class TUI:
         sys.exit(0)
 
     def auto_update(self):
-        if not getattr(sys, 'frozen', False) or 'CURSEBREAKER_VARDEXMODE' in os.environ:
-            return
         # Upstream binaries would replace this fork with an unverified build; the fork runs from source.
         return
+        if not getattr(sys, 'frozen', False) or 'CURSEBREAKER_VARDEXMODE' in os.environ:
+            return
         try:
             if os.path.isfile(f'{sys.executable}.old'):
                 with suppress(PermissionError):
@@ -361,6 +363,15 @@ class TUI:
             with open('CurseBreaker.html', 'a+', encoding='utf-8') as log:
                 log.write(html)
 
+    def print_notices(self):
+        summary, alert = summarize(self.core.verification)
+        if summary:
+            self.console.print(f'\n{escape(summary)}', highlight=False)
+        if alert:
+            self.console.print(f'[bold red]{escape(alert)}[/bold red]', highlight=False)
+        for notice in self.core.notices:
+            self.console.print(f'\n[bold yellow]{escape(notice)}[/bold yellow]', highlight=False)
+
     def print_author_reminder(self):
         if random.randint(1, 10) != 1:
             return
@@ -423,6 +434,7 @@ class TUI:
             'backup': None,
             'import': {'install': None},
             'export': None,
+            'protect': WordCompleter(['-r', *self.list_addon_directories()], ignore_case=True, WORD=True),
             'toggle': {'authors': None,
                        'autoupdate': None,
                        'autoupdate_delay': None,
@@ -440,6 +452,11 @@ class TUI:
             'help': None,
             'exit': None
         })
+
+    def list_addon_directories(self):
+        with suppress(OSError):
+            return sorted((d.name for d in os.scandir(self.core.path) if d.is_dir()), key=str.lower)
+        return []
 
     def setup_table(self, sources=False):
         self.table = Table(box=box.SQUARE)
@@ -496,15 +513,18 @@ class TUI:
         if not args:
             self.console.print('[green]Usage:[/green]\n\tThis command accepts a space-separated list of links as an arg'
                                'ument.[bold white]\n\tFlags:[/bold white]\n\t\t[bold white]-i[/bold white] - Disable th'
-                               'e client version check.\n[bold green]Supported URL:[/bold green]\n\thttps://addons.wago'
+                               'e client version check.\n\t\t[bold white]-a[/bold white] - Adopt existing directories n'
+                               'ot managed by CurseBreaker.\n[bold green]Supported URL:[/bold green]\n\thttps://addons.wago'
                                '.io/addons/\\[addon_name] [bold white]|[/bold white] wa:\\[addon_name]\n\thttps://www.w'
                                'owinterface.com/downloads/\\[addon_name] [bold white]|[/bold white] wowi:\\[addon_id]\n'
                                '\thttps://github.com/\\[username]/\\[repository_name] [bold white]|[/bold white] gh:\\['
                                'username]/\\[repository_name]\n\tElvUI [bold white]|[/bold white] Tukui\n\t' +
                                self.parse_custom_addons(), highlight=False)
             return
-        args, flags = self.parse_flags(args, ('-i',))
+        args, flags = self.parse_flags(args, ('-i', '-a'))
         optignore = '-i' in flags
+        optadopt = '-a' in flags
+        self.core.reset_notices()
         args = re.sub(r'([a-zA-Z0-9_:])( +)([a-zA-Z0-9_:])', r'\1,\3', args)
         addons = [re.sub(r'[\[\]]', '', addon).strip() for addon in next(iter(reader([args], skipinitialspace=True)))]
         exceptions = []
@@ -522,7 +542,7 @@ class TUI:
                 while not progress.finished:
                     for addon in addons:
                         try:
-                            installed, name, version = self.core.add_addon(addon, optignore)
+                            installed, name, version = self.core.add_addon(addon, optignore, optadopt)
                             if installed:
                                 self.table.add_row('[green]Installed[/green]', Text(name, no_wrap=True),
                                                    Text(version, no_wrap=True))
@@ -533,6 +553,7 @@ class TUI:
                             exceptions.append(e)
                         progress.update(task, advance=1, refresh=True)
             self.console.print(self.table)
+            self.print_notices()
         if exceptions:
             self.handle_exception(exceptions, False)
 
@@ -615,6 +636,7 @@ class TUI:
                                'ns.', highlight=False)
             return
         exceptions = []
+        self.core.reset_notices()
         with Progress('{task.completed:.0f}/{task.total}', '|', BarColumn(bar_width=None), '|',
                       console=None if self.headless else self.console) as progress:
             task = progress.add_task('', total=len(addons), start=bool(args))
@@ -636,6 +658,7 @@ class TUI:
         self.console.print(self.table)
         if compacted > 0:
             self.console.print(f'Additionally [green]{compacted}[/green] addons are up-to-date.')
+        self.print_notices()
         if overlap := self.core.check_if_overlap():
             self.console.print(f'\n[bold red]Detected addon directory overlap. This will cause issues. Affected add'
                                f'ons:[/bold red]\n{overlap}')
@@ -669,6 +692,29 @@ class TUI:
         self.console.print('\n[green]Files that are leftovers after no longer installed addons:[/green]')
         for orphan in sorted(orphansf):
             self.console.print(orphan, highlight=False)
+
+    def c_protect(self, args):
+        protected = self.core.protected_directories()
+        if not args:
+            self.console.print('[green]Usage:[/green]\n\t[green]protect [Directory][/green]\n\t\tCommand accepts a spa'
+                               'ce-separated list of AddOns directory names.\n\t\tProtected directories are never wri'
+                               'tten or removed by CurseBreaker.\n\t[bold white]Flags:[/bold white]\n\t\t[bold white]'
+                               '-r[/bold white] - Remove the protection.\n\n[green]Protected directories:[/green]',
+                               highlight=False)
+            for directory in sorted(protected, key=str.lower):
+                self.console.print(escape(directory), highlight=False)
+            return
+        args, flags = self.parse_flags(args, ('-r',))
+        directories = args.split()
+        if invalid := [d for d in directories if not is_addon_directory(d)]:
+            self.console.print(f'[bold red]Invalid directory name: {escape(", ".join(invalid))}[/bold red]')
+            return
+        if '-r' in flags:
+            changed = self.core.unprotect_directories(directories)
+            self.console.print(f'No longer protected: {escape(", ".join(changed) or "-")}', highlight=False)
+        else:
+            changed = self.core.protect_directories(directories)
+            self.console.print(f'Now protected: {escape(", ".join(changed) or "-")}', highlight=False)
 
     def c_uri_integration(self, _):
         if self.os == 'Windows':
@@ -963,6 +1009,7 @@ class TUI:
         self.console.print('[green]install [URL][/green]\n\tCommand accepts a space-separated list of links.\n\t[bold w'
                            'hite]Flags:[/bold white]\n\t'
                            '\t[bold white]-i[/bold white] - Disable the client version check.\n'
+                           '\t\t[bold white]-a[/bold white] - Adopt existing directories not managed by CurseBreaker.\n'
                            '[green]uninstall [URL/Name][/green]\n\tCommand accepts a space-separated list of addon name'
                            's or full links.\n\t[bold white]Flags:[/bold white]\n\t\t[bold white]-k[/bold white] - Keep'
                            ' the addon files after uninstalling.\n'
@@ -984,6 +1031,10 @@ class TUI:
                            '[green]import[/green]\n\tCommand attempts to import already installed addons.\n'
                            '[green]export[/green]\n\tCommand prints list of all installed addons in a form suitable f'
                            'or sharing.\n'
+                           '[green]protect [Directory][/green]\n\tCommand accepts a space-separated list of AddOns dire'
+                           'ctory names.\n\tProtected directories are never written or removed by CurseBreaker.\n\tW'
+                           'ithout arguments lists protected directories.\n\t[bold white]Flags:[/bold white]\n\t\t[bol'
+                           'd white]-r[/bold white] - Remove the protection.\n'
                            '[green]toggle authors[/green]\n\tEnables/disables the display of addon author names in the '
                            'table.\n'
                            '[green]toggle autoupdate[/green]\n\tEnables/disables the automatic addon update on startup'
