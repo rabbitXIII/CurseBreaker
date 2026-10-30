@@ -245,3 +245,19 @@ def test_open_archive_garbage_stays_a_parse_error():
     with pytest.raises(RuntimeError, match='not a valid ZIP') as error:
         Verify.open_archive(b'<html>', 'Foo')
     assert not isinstance(error.value, Verify.Refusal)
+
+
+CUSTOM = {'raw:dev': {'Repository': 'owner/Raw', 'Branch': 'main', 'Name': 'Raw'}}
+
+
+def test_branch_source_matches_case_insensitively():
+    assert Verify.branch_source(CUSTOM, 'RAW:Dev') is CUSTOM['raw:dev']
+
+
+def test_branch_source_misses_unknown_entry():
+    assert Verify.branch_source(CUSTOM, 'other:dev') is None
+
+
+def test_branch_source_matches_trailing_slash_like_add_addon():
+    assert Verify.branch_source(CUSTOM, 'raw:dev/') is CUSTOM['raw:dev']
+    assert Verify.branch_source(CUSTOM, 'RAW:DEV/') is CUSTOM['raw:dev']

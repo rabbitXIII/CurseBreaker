@@ -15,6 +15,7 @@ MAX_UNCOMPRESSED_BYTES = 1024 * 1024 * 1024
 MAX_RATIO = 200
 RATIO_MIN_BYTES = 1024 * 1024
 INSECURE_ENV = 'CURSEBREAKER_INSECURE_SKIP_VERIFY'
+BRANCH_CONFIRMATION = 'branch install needs confirmation; rerun with -u to allow it.'
 
 
 @dataclass
@@ -27,6 +28,10 @@ class Download:
 
 def insecure():
     return os.environ.get(INSECURE_ENV) == '1'
+
+
+def branch_source(custom_repository, url):
+    return custom_repository.get(url.lower().removesuffix('/'))
 
 
 def parse_digest(digest):
