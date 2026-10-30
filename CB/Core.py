@@ -382,9 +382,9 @@ class Core:
             self.notices.append(f'{new.name}: not updating from {oldversion} to older version {new.currentVersion}. '
                                 f'Use force_update to install it anyway.')
             return True
-        incomparable = Verify.first_incomparable(oldversion, new.currentVersion)
-        if incomparable is not None and not isinstance(new, GitHubAddonRaw):
-            self.notices.append(f'{new.name}: downgrade protection is off because {incomparable!r} '
+        incomparable = Verify.incomparable_versions(oldversion, new.currentVersion)
+        if incomparable and not isinstance(new, GitHubAddonRaw):
+            self.notices.append(f'{new.name}: downgrade protection is off because {incomparable[0]!r} '
                                 f'is not a comparable version.')
         return False
 

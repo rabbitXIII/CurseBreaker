@@ -286,12 +286,24 @@ def test_unparseable_tags_install_with_one_notice(core, github, addons):
         "Repo: downgrade protection is off because 'r123' is not a comparable version."]
 
 
-def test_unparseable_new_tag_is_named(core, github):
+def test_unparseable_new_tag_is_named(core, github, addons):
     install_github_tag(core, github, 'v1.0', 'old')
     github('owner/Repo', 'nightly', {'Repo/Repo.toc': 'new'})
     core.update_addon(GH, True, False)
+    assert (addons / 'Repo' / 'Repo.toc').read_text() == 'new'
+    assert core.config['Addons'][0]['Version'] == 'nightly'
     assert downgrade_notices(core) == [
         "Repo: downgrade protection is off because 'nightly' is not a comparable version."]
+
+
+def test_blocked_addon_stays_blocked_on_upgrade(core, github, addons):
+    install_github_tag(core, github, 'spoken/v3.5.0', 'old')
+    assert core.block_toggle(GH) is True
+    github('owner/Repo', 'spoken/v3.6.0', {'Repo/Repo.toc': 'new'})
+    result = core.update_addon(GH, True, False)
+    assert result[6] is True
+    assert (addons / 'Repo' / 'Repo.toc').read_text() == 'old'
+    assert core.config['Addons'][0]['Version'] == 'spoken/v3.5.0'
 
 
 def test_unchanged_version_has_no_downgrade_notice(core, github):

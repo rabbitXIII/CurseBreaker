@@ -208,11 +208,12 @@ def test_comparable_version():
     assert Verify.comparable_version(None) is None
 
 
-def test_first_incomparable():
-    assert Verify.first_incomparable('v1.0', 'spoken/v2.0') is None
-    assert Verify.first_incomparable('r123', '1.0') == 'r123'
-    assert Verify.first_incomparable('1.0', 'beta') == 'beta'
-    assert Verify.first_incomparable('r123', 'beta') == 'r123'
+def test_incomparable_versions():
+    assert Verify.incomparable_versions('v1.0', 'spoken/v2.0') == []
+    assert Verify.incomparable_versions('r123', '1.0') == ['r123']
+    assert Verify.incomparable_versions('1.0', 'beta') == ['beta']
+    assert Verify.incomparable_versions('r123', 'beta') == ['r123', 'beta']
+    assert Verify.incomparable_versions(None, '1.0') == [None]
 
 
 def test_lock_mismatch():

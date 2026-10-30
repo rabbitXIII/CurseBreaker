@@ -157,7 +157,7 @@ def ownership_conflicts(directories, protected, owners, previous, existing, adop
 
 
 def release_version(tag):
-    return re.sub(r'^[vV]', '', str(tag).rsplit('/', 1)[-1], count=1)
+    return re.sub(r'^[vV]', '', str(tag).rsplit('/', 1)[-1])
 
 
 def comparable_version(tag):
@@ -167,8 +167,8 @@ def comparable_version(tag):
         return None
 
 
-def first_incomparable(*tags):
-    return next((tag for tag in tags if comparable_version(tag) is None), None)
+def incomparable_versions(*tags):
+    return [tag for tag in tags if comparable_version(tag) is None]
 
 
 def is_downgrade(old, new):
