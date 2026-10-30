@@ -38,6 +38,7 @@ from prompt_toolkit import PromptSession, HTML
 from prompt_toolkit.completion import WordCompleter, NestedCompleter
 from packaging.version import Version
 from CB import is_addon_directory, __version__
+from CB.Search import identity_key, installed_keys
 from CB.Core import Core
 from CB.Verify import summarize, branch_source, Refusal, BRANCH_CONFIRMATION
 from CB.Wago import WagoUpdater
@@ -1044,6 +1045,8 @@ class TUI:
         if not args:
             self.console.print('[green]Usage:[/green]\n\tThis command accepts a search query as an argument.')
             return
+        if self.core.config['WAAAPIKey'] == '':
+            return self.print_free_search(args)
         results = self.core.search(args)
         self.console.print('[green]Top results of your search:[/green]')
         for url in results:
@@ -1051,6 +1054,23 @@ class TUI:
                 self.console.print(f'[link={url}]{url}[/link] [yellow][Installed][/yellow]', highlight=False)
             else:
                 self.console.print(f'[link={url}]{url}[/link]', highlight=False)
+
+    def print_free_search(self, query):
+        outcome = self.core.free_search(query)
+        installed = installed_keys(self.core.config['Addons'])
+        self.console.print('[green]Top results of your search:[/green]')
+        for result in outcome.results:
+            self.console.print(self.free_search_line(result, installed), highlight=False, emoji=False)
+        for note in outcome.notes:
+            self.console.print(f'[yellow]{escape(note)}[/yellow]', highlight=False, emoji=False)
+
+    def free_search_line(self, result, installed):
+        line = f'{escape(result.slug)} {escape(result.name)} {escape(result.source)} {escape(result.updated)}'
+        if result.marker:
+            line += f' {escape(f"[{result.marker}]")}'
+        if identity_key(result.url) in installed:
+            line += ' [yellow][Installed][/yellow]'
+        return line
 
     def c_backup(self, _):
         self.core.backup_wtf(None if self.headless else self.console)
@@ -1102,6 +1122,9 @@ class TUI:
                            'e source display option.\n'
                            '[green]orphans[/green]\n\tPrints list of orphaned directories and files.\n'
                            '[green]search [Keyword][/green]\n\tExecutes addon search on Wago Addons.\n'
+                           '\tWithout a Wago Addons API key it searches WoWInterface and GitHub instead.\n\tGitHub r'
+                           'esults marked \\[verified] have a latest stable release that publishes SHA-256 dige'
+                           'sts.\n\tEach search makes one GitHub search request plus up to five release requests.\n'
                            '[green]backup[/green]\n\tCommand creates a backup of WTF directory.\n'
                            '[green]import[/green]\n\tCommand attempts to import already installed addons.\n'
                            '[green]export[/green]\n\tCommand prints list of all installed addons in a form suitable f'
