@@ -8,7 +8,7 @@ A fork of [AcidWeb/CurseBreaker](https://github.com/AcidWeb/CurseBreaker) that c
 - **Folder ownership.** An addon may only write its own folders. A folder owned by another managed addon is refused, and so is an existing folder CurseBreaker doesn't manage (for example a personal addon you are developing) unless you install with `-a` to adopt it. `protect DIR [DIR...]` marks folders that are never written or deleted, even by `force_update`. `protect` lists them and `protect -r DIR` removes the protection.
 - **No silent downgrades.** If the new version is older than the installed one, `update` skips it and says so. Use `force_update` to install it anyway.
 - **No self-update.** Upstream binaries would replace this fork with an unverified build, so the fork runs from source.
-- **Search without a Wago key.** `search` falls back to WoWInterface and GitHub. GitHub results are marked `[verified]` when the release the installer would pick publishes SHA-256 digests, `[unverified]` when it doesn't and `[no release]` when there is none. Searching uses GitHub API requests (one search plus one per GitHub result) from the same hourly quota as updates.
+- **Search without a Wago key.** `search` falls back to WoWInterface and GitHub. GitHub results are marked `[verified]` when the latest stable release with assets publishes SHA-256 digests, `[unverified]` when it doesn't and `[no release]` when there is none. Each search makes one GitHub search request plus up to five release requests.
 
 Setting `CURSEBREAKER_INSECURE_SKIP_VERIFY=1` turns hash and lock mismatches into warnings. Use it only to recover from a known-good republish.
 

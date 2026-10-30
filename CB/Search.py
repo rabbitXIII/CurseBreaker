@@ -1,7 +1,7 @@
 import re
 import html
 import httpx
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from dataclasses import dataclass
 from . import APIAuth, Verify
 
@@ -10,13 +10,18 @@ GITHUB_SEARCH_URL = 'https://api.github.com/search/repositories'
 WOWI_LIMIT = 10
 GITHUB_LIMIT = 5
 GITHUB_PER_PAGE = 30
-RELEASES_PER_PAGE = 10
+RELEASES_PER_PAGE = 30
 MAX_EPOCH_MS = 253402300800000
 RATE_LIMIT_STATUSES = (403, 429)
-WOW_PATTERN = re.compile(r'wow|warcraft|addon', re.I)
+UNAUTHORIZED_STATUS = 401
+EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+WOW_PATTERN = re.compile(r'\bwow|warcraft', re.I)
+COUNT_LIMIT = 10 ** 18
+COUNT_PATTERN = re.compile(r'[0-9]{1,18}')
 DATE_PATTERN = re.compile(r'^\d{4}-\d{2}-\d{2}')
 CONTROL_PATTERN = re.compile(r'[\x00-\x1f\x7f]')
 GITHUB_HINT = 'Setting gh_api raises the rate limit.'
+REJECTED_HINT = 'GitHub rejected the gh_api token; check set gh_api.'
 
 
 class SearchError(RuntimeError):
@@ -50,9 +55,16 @@ def attempt(method, *args):
 
 
 def with_hint(text, error, token):
+    if token and error.status == UNAUTHORIZED_STATUS:
+        return f'{text} {REJECTED_HINT}'
     if not token and error.status in RATE_LIMIT_STATUSES:
         return f'{text} {GITHUB_HINT}'
     return text
+
+
+def release_check_note(failures, token):
+    text = f'GitHub release checks failed ({failures[0].reason}); some results have no marker.'
+    return with_hint(text, failures[0], token)
 
 
 def clean_text(text):
@@ -77,11 +89,16 @@ def is_wow_repository(item):
     return any(WOW_PATTERN.search(text) for text in texts if isinstance(text, str))
 
 
+def is_count(value):
+    if isinstance(value, int) and not isinstance(value, bool):
+        return 0 <= value < COUNT_LIMIT
+    return isinstance(value, str) and COUNT_PATTERN.fullmatch(value) is not None
+
+
 def is_listed_file(entry):
     return (isinstance(entry, dict) and isinstance(entry.get('UIName'), str)
-            and str(entry.get('UID')).isdigit()
-            and isinstance(entry.get('UIDate'), int) and 0 <= entry['UIDate'] < MAX_EPOCH_MS
-            and isinstance(entry.get('UIDownloadTotal'), str) and entry['UIDownloadTotal'].isdigit())
+            and is_count(entry.get('UID')) and is_count(entry.get('UIDownloadTotal'))
+            and isinstance(entry.get('UIDate'), int) and 0 <= entry['UIDate'] < MAX_EPOCH_MS)
 
 
 def listed_file(entry):
@@ -98,7 +115,7 @@ def pushed_date(value):
 
 
 def wowi_result(entry):
-    updated = datetime.fromtimestamp(entry['UIDate'] / 1000, UTC).strftime('%Y-%m-%d')
+    updated = (EPOCH + timedelta(milliseconds=entry['UIDate'])).strftime('%Y-%m-%d')
     return SearchResult(f'wowi:{entry["UID"]}', f'https://www.wowinterface.com/downloads/info{entry["UID"]}.html',
                         entry['UIName'], 'WoWInterface', updated)
 
@@ -110,7 +127,8 @@ def is_installable(release):
 
 def has_digest(asset):
     digest = asset.get('digest') if isinstance(asset, dict) else None
-    return isinstance(digest, str) and bool(Verify.parse_digest(digest))
+    parsed = Verify.parse_digest(digest) if isinstance(digest, str) else None
+    return bool(parsed and parsed[1])
 
 
 def release_marker(releases):
@@ -130,13 +148,13 @@ class FreeSearch:
     def get_json(self, label, url, **kwargs):
         try:
             response = self.http.get(url, **kwargs)
-        except httpx.HTTPError as e:
+        except (httpx.HTTPError, httpx.InvalidURL) as e:
             raise SearchError(label, e.__class__.__name__) from e
         if response.status_code != 200:
             raise SearchError(label, f'HTTP {response.status_code}', response.status_code)
         try:
             return response.json()
-        except ValueError as e:
+        except (ValueError, RecursionError) as e:
             raise SearchError(label, 'invalid response') from e
 
     def search(self, query, token):
@@ -154,7 +172,10 @@ class FreeSearch:
             payload = self.get_json('WoWInterface', WOWI_FILELIST_URL)
             if not isinstance(payload, list):
                 raise SearchError('WoWInterface', 'invalid response')
-            self.fileList = [listed_file(entry) for entry in payload if is_listed_file(entry)]
+            listed = [listed_file(entry) for entry in payload if is_listed_file(entry)]
+            if payload and not listed:
+                raise SearchError('WoWInterface', 'invalid response')
+            self.fileList = listed
         words = query.lower().split()
         matches = [entry for entry in self.fileList if all(word in entry['UIName'].lower() for word in words)]
         matches.sort(key=lambda entry: entry['UIDownloadTotal'], reverse=True)
@@ -169,8 +190,7 @@ class FreeSearch:
         items = [item for item in payload['items'] if is_listed_repository(item) and is_wow_repository(item)]
         failures = []
         results = [self.github_result(item, auth, failures) for item in items[:GITHUB_LIMIT]]
-        notes = [with_hint(f'GitHub release checks failed ({failures[0].reason}); some results have no marker.',
-                           failures[0], token)] if failures else []
+        notes = [release_check_note(failures, token)] if failures else []
         return SearchOutcome(results, notes)
 
     def github_result(self, item, auth, failures):
