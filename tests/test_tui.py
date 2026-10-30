@@ -79,6 +79,7 @@ def test_protect_is_completed_and_documented(tui, addons, monkeypatch):
 
 def test_auto_update_is_disabled(tui, monkeypatch):
     monkeypatch.setattr(sys, 'frozen', True, raising=False)
+    monkeypatch.delenv('CURSEBREAKER_VARDEXMODE', raising=False)
     monkeypatch.setattr(tui.core, 'http', None)
     assert tui.auto_update() is None
 
