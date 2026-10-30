@@ -1,3 +1,34 @@
+# About this fork
+
+A fork of [AcidWeb/CurseBreaker](https://github.com/AcidWeb/CurseBreaker) that checks what it downloads and where it writes.
+
+- **Verified downloads.** WoWInterface files are checked against their published MD5 and GitHub release assets against their SHA-256 digest. A mismatch aborts the install. Tukui, Wago Addons and `:Dev` branch archives publish no hash; installs from them are reported as unverified.
+- **Trust on first use.** Each install records the version and SHA-256 of the file. If the same version is later served with different bytes, the update is refused.
+- **Archive limits.** 100 MiB download, 20000 members, 1 GiB uncompressed. Symlinks, absolute paths and `..` traversal are rejected, and loose top-level files are never written into `AddOns`.
+- **Folder ownership.** An addon may only write its own folders. A folder owned by another managed addon is refused, and so is an existing folder CurseBreaker doesn't manage (for example a personal addon you are developing) unless you install with `-a` to adopt it. `protect DIR [DIR...]` marks folders that are never written or deleted, even by `force_update`. `protect` lists them and `protect -r DIR` removes the protection.
+- **No silent downgrades.** If the new version is older than the installed one, `update` skips it and says so. Use `force_update` to install it anyway.
+- **No self-update.** Upstream binaries would replace this fork with an unverified build, so the fork runs from source.
+
+Setting `CURSEBREAKER_INSECURE_SKIP_VERIFY=1` turns hash and lock mismatches into warnings. Use it only to recover from a known-good republish.
+
+### Quickstart
+
+```sh
+git clone https://github.com/rabbitXIII/CurseBreaker
+cd CurseBreaker
+./cb.sh              # interactive; also ./cb.sh status, ./cb.sh update, ./cb.sh headless
+```
+
+`cb.sh` runs inside `/Applications/World of Warcraft/_forever_`. For another client, set `CURSEBREAKER_WOW_DIR` (e.g. `.../_retail_`). It uses `uv` if it is installed. Otherwise it creates `.venv` with Python 3.14+.
+
+### Tracking upstream
+
+```sh
+git fetch upstream && git merge upstream/master
+```
+
+The fork's logic lives in `CB/Verify.py` with small hooks at the call sites, so merge conflicts stay small. Tests: `uv run pytest`.
+
 # CurseBreaker
 
 [<img src="https://img.shields.io/github/release/AcidWeb/CurseBreaker">](https://github.com/AcidWeb/CurseBreaker/releases/latest) [<img src="https://img.shields.io/github/downloads/AcidWeb/CurseBreaker/latest/total">](https://github.com/AcidWeb/CurseBreaker/releases/latest) [<img src="https://img.shields.io/github/downloads/AcidWeb/CurseBreaker/total">](https://github.com/AcidWeb/CurseBreaker/releases/latest) [<img src="https://img.shields.io/github/actions/workflow/status/AcidWeb/CurseBreaker/build.yml">](https://github.com/AcidWeb/CurseBreaker/actions) [<img src="https://img.shields.io/discord/362155557488164874?logo=discord">](https://discord.gg/G2SXFGb)
