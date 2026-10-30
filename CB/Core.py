@@ -375,6 +375,19 @@ class Core:
             return old['Name'], old['Version']
         return False, False
 
+    def check_downgrade(self, new, oldversion, force):
+        if force or new.currentVersion == oldversion:
+            return False
+        if Verify.is_downgrade(oldversion, new.currentVersion):
+            self.notices.append(f'{new.name}: not updating from {oldversion} to older version {new.currentVersion}. '
+                                f'Use force_update to install it anyway.')
+            return True
+        incomparable = Verify.incomparable_versions(oldversion, new.currentVersion)
+        if incomparable and not isinstance(new, GitHubAddonRaw):
+            self.notices.append(f'{new.name}: downgrade protection is off because {incomparable[0]!r} '
+                                f'is not a comparable version.')
+        return False
+
     def update_addon(self, url, update, force):
         if not (old := self.check_if_installed(url)):
             return url, [], False, False, None, False, False, '?', None, None, None, False
@@ -389,10 +402,7 @@ class Core:
                        None, dev, False
         source, sourceurl = self.parse_url_source(old['URL'])
         new = self.parse_url(old['URL'])
-        if not force and new.currentVersion != old['Version'] and Verify.is_downgrade(oldversion, new.currentVersion):
-            self.notices.append(f'{new.name}: not updating from {oldversion} to older version {new.currentVersion}. '
-                                f'Use force_update to install it anyway.')
-            blocked = True
+        blocked = self.check_downgrade(new, oldversion, force) or blocked
         if not new.ignoreUpdate and (force or (new.currentVersion != old['Version'] and update
                                                and not modified and not blocked)):
             new.get_addon()

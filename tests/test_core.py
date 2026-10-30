@@ -248,6 +248,93 @@ def test_unparseable_versions_skip_downgrade_check(core, wowi, addons):
     assert (addons / 'Foo' / 'Foo.toc').read_text() == 'b'
 
 
+def install_github_tag(core, github, tag, content):
+    github('owner/Repo', tag, {'Repo/Repo.toc': content})
+    core.add_addon('gh:owner/Repo', False)
+    core.reset_notices()
+
+
+def downgrade_notices(core):
+    return [n for n in core.notices if 'older version' in n or 'downgrade protection is off' in n]
+
+
+def test_github_tag_downgrade_refused(core, github, addons):
+    install_github_tag(core, github, 'spoken/v3.6.0', 'new')
+    github('owner/Repo', 'spoken/v3.5.0', {'Repo/Repo.toc': 'old'})
+    result = core.update_addon(GH, True, False)
+    assert result[6] is True
+    assert (addons / 'Repo' / 'Repo.toc').read_text() == 'new'
+    assert core.config['Addons'][0]['Version'] == 'spoken/v3.6.0'
+    assert len(downgrade_notices(core)) == 1
+    assert 'not updating from spoken/v3.6.0 to older version spoken/v3.5.0' in core.notices[0]
+
+
+def test_github_tag_upgrade_installs(core, github, addons):
+    install_github_tag(core, github, 'spoken/v3.5.0', 'old')
+    github('owner/Repo', 'spoken/v3.6.0', {'Repo/Repo.toc': 'new'})
+    core.update_addon(GH, True, False)
+    assert (addons / 'Repo' / 'Repo.toc').read_text() == 'new'
+    assert downgrade_notices(core) == []
+
+
+def test_unparseable_tags_install_with_one_notice(core, github, addons):
+    install_github_tag(core, github, 'r123', 'old')
+    github('owner/Repo', 'r122', {'Repo/Repo.toc': 'new'})
+    core.update_addon(GH, True, False)
+    assert (addons / 'Repo' / 'Repo.toc').read_text() == 'new'
+    assert downgrade_notices(core) == [
+        "Repo: downgrade protection is off because 'r123' is not a comparable version."]
+
+
+def test_unparseable_new_tag_is_named(core, github, addons):
+    install_github_tag(core, github, 'v1.0', 'old')
+    github('owner/Repo', 'nightly', {'Repo/Repo.toc': 'new'})
+    core.update_addon(GH, True, False)
+    assert (addons / 'Repo' / 'Repo.toc').read_text() == 'new'
+    assert core.config['Addons'][0]['Version'] == 'nightly'
+    assert downgrade_notices(core) == [
+        "Repo: downgrade protection is off because 'nightly' is not a comparable version."]
+
+
+def test_blocked_addon_stays_blocked_on_upgrade(core, github, addons):
+    install_github_tag(core, github, 'spoken/v3.5.0', 'old')
+    assert core.block_toggle(GH) is True
+    github('owner/Repo', 'spoken/v3.6.0', {'Repo/Repo.toc': 'new'})
+    result = core.update_addon(GH, True, False)
+    assert result[6] is True
+    assert (addons / 'Repo' / 'Repo.toc').read_text() == 'old'
+    assert core.config['Addons'][0]['Version'] == 'spoken/v3.5.0'
+
+
+def test_unchanged_version_has_no_downgrade_notice(core, github):
+    install_github_tag(core, github, 'r123', 'old')
+    core.update_addon(GH, True, False)
+    assert downgrade_notices(core) == []
+
+
+def test_branch_install_commit_change_has_no_downgrade_notice(core, router, addons):
+    branch = 'https://api.github.com/repos/owner/Raw/branches/main'
+    router.add(branch, {'commit': {'sha': 'abcdef0123'}})
+    router.add('https://github.com/owner/Raw/archive/refs/heads/main.zip', make_zip({'Raw-main/Raw/Raw.toc': 'x'}))
+    core.add_addon('raw:dev', False, branch_confirmed=True)
+    core.reset_notices()
+    router.add(branch, {'commit': {'sha': '0123456789'}})
+    core.update_addon('raw:dev', True, False)
+    assert core.config['Addons'][0]['Version'] == '0123456'
+    assert downgrade_notices(core) == []
+
+
+def test_force_update_has_no_downgrade_notice(core, github, addons):
+    install_github_tag(core, github, 'spoken/v3.6.0', 'new')
+    github('owner/Repo', 'spoken/v3.5.0', {'Repo/Repo.toc': 'old'})
+    core.update_addon(GH, True, True)
+    assert (addons / 'Repo' / 'Repo.toc').read_text() == 'old'
+    assert downgrade_notices(core) == []
+    github('owner/Repo', 'r122', {'Repo/Repo.toc': 'odd'})
+    core.update_addon(GH, True, True)
+    assert downgrade_notices(core) == []
+
+
 def test_directory_set_change_notice(core, wowi, addons):
     wowi(100, '1.0', {'Foo/Foo.toc': 'x', 'FooOld/FooOld.toc': 'x'})
     core.add_addon('wowi:100', False)

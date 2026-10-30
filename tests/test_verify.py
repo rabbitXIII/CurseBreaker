@@ -2,6 +2,7 @@ import io
 import os
 import zipfile
 import pytest
+from packaging.version import Version
 from CB import Verify
 from conftest import make_zip, md5, sha256, tree
 
@@ -177,6 +178,42 @@ def test_is_downgrade():
     assert not Verify.is_downgrade('1.0', '1.0')
     assert not Verify.is_downgrade('r123', 'r122')
     assert not Verify.is_downgrade('abc1234', 'def5678')
+    assert Verify.is_downgrade('spoken/v3.6.0', 'spoken/v3.5.0')
+    assert not Verify.is_downgrade('spoken/v3.5.0', 'spoken/v3.6.0')
+    assert Verify.is_downgrade('v2.0', '1.9')
+    assert not Verify.is_downgrade('v2.0', '2.1')
+    assert Verify.is_downgrade('V1.1', 'V1.0')
+    assert Verify.is_downgrade('a/b/v1.2', 'a/b/v1.1')
+    assert not Verify.is_downgrade('spoken/v3.6.0', 'r122')
+    assert not Verify.is_downgrade('r123', 'spoken/v3.5.0')
+
+
+def test_release_version():
+    assert Verify.release_version('spoken/v3.6.0') == '3.6.0'
+    assert Verify.release_version('a/b/V1.2') == '1.2'
+    assert Verify.release_version('v1.0') == '1.0'
+    assert Verify.release_version('1.0') == '1.0'
+    assert Verify.release_version('vv1.0') == 'v1.0'
+    assert Verify.release_version('r123') == 'r123'
+    assert Verify.release_version('spoken/') == ''
+
+
+def test_comparable_version():
+    assert Verify.comparable_version('spoken/v3.6.0') == Version('3.6.0')
+    assert Verify.comparable_version('V1.0') == Version('1.0')
+    assert Verify.comparable_version('r123') is None
+    assert Verify.comparable_version('abc1234') is None
+    assert Verify.comparable_version('spoken/') is None
+    assert Verify.comparable_version('') is None
+    assert Verify.comparable_version(None) is None
+
+
+def test_incomparable_versions():
+    assert Verify.incomparable_versions('v1.0', 'spoken/v2.0') == []
+    assert Verify.incomparable_versions('r123', '1.0') == ['r123']
+    assert Verify.incomparable_versions('1.0', 'beta') == ['beta']
+    assert Verify.incomparable_versions('r123', 'beta') == ['r123', 'beta']
+    assert Verify.incomparable_versions(None, '1.0') == [None]
 
 
 def test_lock_mismatch():
