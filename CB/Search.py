@@ -167,17 +167,23 @@ class FreeSearch:
             raise RuntimeError('\n'.join(failures))
         return SearchOutcome(wowinterface.results + github.results, failures + wowinterface.notes + github.notes)
 
-    def wowinterface(self, query):
+    def file_list(self):
         if self.fileList is None:
-            payload = self.get_json('WoWInterface', WOWI_FILELIST_URL)
-            if not isinstance(payload, list):
-                raise SearchError('WoWInterface', 'invalid response')
-            listed = [listed_file(entry) for entry in payload if is_listed_file(entry)]
-            if payload and not listed:
-                raise SearchError('WoWInterface', 'invalid response')
-            self.fileList = listed
+            self.fileList = self.fetch_file_list()
+        return self.fileList
+
+    def fetch_file_list(self):
+        payload = self.get_json('WoWInterface', WOWI_FILELIST_URL)
+        if not isinstance(payload, list):
+            raise SearchError('WoWInterface', 'invalid response')
+        listed = [listed_file(entry) for entry in payload if is_listed_file(entry)]
+        if payload and not listed:
+            raise SearchError('WoWInterface', 'invalid response')
+        return listed
+
+    def wowinterface(self, query):
         words = query.lower().split()
-        matches = [entry for entry in self.fileList if all(word in entry['UIName'].lower() for word in words)]
+        matches = [entry for entry in self.file_list() if all(word in entry['UIName'].lower() for word in words)]
         matches.sort(key=lambda entry: entry['UIDownloadTotal'], reverse=True)
         return SearchOutcome([wowi_result(entry) for entry in matches[:WOWI_LIMIT]], [])
 
