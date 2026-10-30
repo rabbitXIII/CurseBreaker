@@ -6,7 +6,9 @@ import hashlib
 import zipfile
 import pytest
 from pathlib import Path
+from rich.console import Console
 from CB.Core import Core
+from CurseBreaker import TUI
 
 
 def make_zip(files, symlinks=()):
@@ -92,6 +94,21 @@ def core(client_dir, http):
                                                               'Authors': ['owner']}}}
     instance.init_config()
     return instance
+
+
+@pytest.fixture
+def tui(core):
+    instance = object.__new__(TUI)
+    instance.core = core
+    instance.console = Console(record=True, width=200, color_system=None)
+    instance.headless = False
+    instance.os = 'Darwin'
+    instance.setup_table()
+    return instance
+
+
+def output(tui):
+    return tui.console.export_text(clear=False)
 
 
 def wowi_payload(uid, version, url, uimd5, pending='0'):

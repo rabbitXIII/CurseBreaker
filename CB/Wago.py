@@ -3,13 +3,14 @@ import re
 import httpx
 import shutil
 import bbcode
-from io import StringIO, BytesIO
+from io import StringIO
 from pathlib import Path
-from zipfile import ZipFile
 from markdown import Markdown
 from urllib.parse import quote_plus
-from . import retry
+from . import retry, Verify
 from .SLPP import loads
+
+COMPANION = 'CurseBreakerCompanion'
 
 
 def markdown_unmark_element(element, stream=None):
@@ -212,12 +213,22 @@ class WagoUpdater:
                       '  },\n'
                       '}')
 
+    def download_companion(self):
+        result = Verify.download(self.http, 'https://cursebreaker.acidweb.dev/CurseBreakerCompanion.zip', None,
+                                 COMPANION)
+        archive = Verify.open_archive(result.content, COMPANION)
+        if not any(name.startswith(f'{COMPANION}/') for name in archive.namelist()):
+            raise RuntimeError(f'{COMPANION}.\nArchive does not contain the {COMPANION} directory.')
+        return archive
+
     def install_companion(self, force):
         target_path = Path('Interface/AddOns/CurseBreakerCompanion')
         if not os.path.isdir(target_path) or force:
+            archive = self.download_companion()
             shutil.rmtree(target_path, ignore_errors=True)
-            ZipFile(BytesIO(self.http.get('https://cursebreaker.acidweb.dev/CurseBreakerCompanion.zip')
-                            .content)).extractall(target_path / '..')
+            Verify.safe_extract(archive, 'Interface/AddOns', [COMPANION], COMPANION)
+            return True
+        return False
 
     def update(self):
         if os.path.isdir(Path('Interface/AddOns/WeakAuras')) and os.path.isfile(
