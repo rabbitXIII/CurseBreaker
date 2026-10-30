@@ -17,6 +17,7 @@ from checksumdir import dirhash
 from urllib.parse import quote_plus
 from rich.progress import Progress, BarColumn
 from . import is_addon_directory, retry, APIAuth, Verify, __version__
+from .Search import FreeSearch
 from .Tukui import TukuiAddon
 from .GitHub import GitHubAddon, GitHubAddonRaw
 from .WagoAddons import WagoAddonsAddon
@@ -39,6 +40,7 @@ class Core:
         self.githubPackagerCache = {}
         self.wagoIdCache = None
         self.tukuiCache = None
+        self.freeSearch = None
         self.configDirty = False
         self.notices = []
         self.verification = []
@@ -567,6 +569,11 @@ class Core:
         self.parse_wagoaddons_error(payload.status_code)
         payload = payload.json()
         return [result['website_url'] for result in payload['data']]
+
+    def free_search(self, query):
+        if self.freeSearch is None:
+            self.freeSearch = FreeSearch(self.http)
+        return self.freeSearch.search(query, self.config['GHAPIKey'])
 
     def create_reg(self):
         with open('CurseBreaker.reg', 'w') as outfile:

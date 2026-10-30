@@ -1009,6 +1009,8 @@ class TUI:
         if not args:
             self.console.print('[green]Usage:[/green]\n\tThis command accepts a search query as an argument.')
             return
+        if self.core.config['WAAAPIKey'] == '':
+            return self.print_free_search(args)
         results = self.core.search(args)
         self.console.print('[green]Top results of your search:[/green]')
         for url in results:
@@ -1016,6 +1018,22 @@ class TUI:
                 self.console.print(f'[link={url}]{url}[/link] [yellow][Installed][/yellow]', highlight=False)
             else:
                 self.console.print(f'[link={url}]{url}[/link]', highlight=False)
+
+    def print_free_search(self, query):
+        outcome = self.core.free_search(query)
+        self.console.print('[green]Top results of your search:[/green]')
+        for result in outcome.results:
+            self.console.print(self.free_search_line(result), highlight=False, emoji=False)
+        for note in outcome.notes:
+            self.console.print(f'[yellow]{escape(note)}[/yellow]', highlight=False, emoji=False)
+
+    def free_search_line(self, result):
+        line = f'{escape(result.slug)} {escape(result.name)} {result.source} {result.updated}'
+        if result.marker:
+            line += f' {escape(f"[{result.marker}]")}'
+        if self.core.check_if_installed(result.url):
+            line += ' [yellow][Installed][/yellow]'
+        return line
 
     def c_backup(self, _):
         self.core.backup_wtf(None if self.headless else self.console)
@@ -1064,7 +1082,9 @@ class TUI:
                            'everse the table compacting option.\n\t\t[bold white]-s[/bold white] - Temporary reverse th'
                            'e source display option.\n'
                            '[green]orphans[/green]\n\tPrints list of orphaned directories and files.\n'
-                           '[green]search [Keyword][/green]\n\tExecutes addon search on Wago Addons.\n'
+                           '[green]search [Keyword][/green]\n\tExecutes addon search on Wago Addons.\n\tWithout a Wago '
+                           'Addons API key it searches WoWInterface and GitHub instead.\n\tGitHub results marked \\[v'
+                           'erified] publish SHA-256 digests.\n'
                            '[green]backup[/green]\n\tCommand creates a backup of WTF directory.\n'
                            '[green]import[/green]\n\tCommand attempts to import already installed addons.\n'
                            '[green]export[/green]\n\tCommand prints list of all installed addons in a form suitable f'
