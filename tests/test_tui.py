@@ -2,6 +2,7 @@ import sys
 import httpx
 import pytest
 from rich.console import Console
+from rich.prompt import Confirm
 from CurseBreaker import TUI
 from conftest import make_zip, tree
 
@@ -278,3 +279,183 @@ def test_corrupt_download_prints_parse_error_not_refusal(tui, wowi):
     assert 'Failed to parse addon data: Addon100.\nDownloaded file is not a valid ZIP archive.' in text
     assert 'Refused:' not in text
     assert 'Traceback' not in text
+
+
+RAW_ARCHIVE = 'https://github.com/owner/Raw/archive/refs/heads/main.zip'
+
+
+@pytest.fixture
+def raw_branch(router):
+    router.add('https://api.github.com/repos/owner/Raw/branches/main', {'commit': {'sha': 'abcdef0123'}})
+    router.add(RAW_ARCHIVE, make_zip({'Raw-main/Raw/Raw.toc': 'x'}))
+
+
+class Prompts(list):
+    def __init__(self, monkeypatch):
+        super().__init__()
+        self.monkeypatch = monkeypatch
+
+    def answer(self, value):
+        def ask(message, **kwargs):
+            self.append((message, kwargs))
+            return value
+        self.monkeypatch.setattr(Confirm, 'ask', ask)
+
+
+@pytest.fixture
+def prompts(monkeypatch):
+    return Prompts(monkeypatch)
+
+
+def set_tty(monkeypatch, value):
+    monkeypatch.setattr(sys.stdin, 'isatty', lambda: value)
+
+
+def test_branch_install_yes_installs_and_names_the_source(tui, raw_branch, prompts, monkeypatch, addons):
+    set_tty(monkeypatch, True)
+    prompts.answer(True)
+    tui.c_install('raw:dev')
+    assert len(prompts) == 1
+    message, kwargs = prompts[0]
+    assert 'Raw installs the "main" branch of owner/Raw.' in message
+    assert "can't be verified" in message
+    assert kwargs == {'default': False, 'console': tui.console}
+    assert 'Installed' in output(tui)
+    assert tree(addons) == ['Raw', 'Raw/Raw.toc']
+
+
+def test_branch_install_no_skips_without_network(tui, router, raw_branch, prompts, monkeypatch, addons):
+    set_tty(monkeypatch, True)
+    prompts.answer(False)
+    tui.c_install('raw:dev')
+    text = output(tui)
+    assert 'Skipped' in text and 'unverifiable branch install' in text
+    assert router.requests == []
+    assert tree(addons) == []
+    assert tui.core.config['Addons'] == []
+
+
+def test_branch_install_without_tty_is_refused(tui, router, raw_branch, prompts, monkeypatch, addons):
+    set_tty(monkeypatch, False)
+    prompts.answer(True)
+    tui.c_install('raw:dev')
+    text = output(tui)
+    assert 'Refused: Raw: branch install needs confirmation; rerun with -u to allow it.' in text
+    assert 'Traceback' not in text
+    assert router.requests == []
+    assert prompts == []
+    assert tree(addons) == []
+
+
+def test_branch_install_flag_skips_the_question(tui, raw_branch, prompts, monkeypatch, addons):
+    set_tty(monkeypatch, False)
+    prompts.answer(False)
+    tui.c_install('-u raw:dev')
+    assert prompts == []
+    assert tree(addons) == ['Raw', 'Raw/Raw.toc']
+
+
+def test_branch_install_flag_skips_the_question_on_a_tty(tui, raw_branch, prompts, monkeypatch, addons):
+    set_tty(monkeypatch, True)
+    prompts.answer(False)
+    tui.c_install('raw:dev -u')
+    assert prompts == []
+    assert tree(addons) == ['Raw', 'Raw/Raw.toc']
+
+
+@pytest.mark.parametrize('tty', [True, False])
+def test_declined_branch_install_still_installs_other_arguments(tui, raw_branch, wowi, prompts, monkeypatch, addons,
+                                                                tty):
+    set_tty(monkeypatch, tty)
+    prompts.answer(False)
+    wowi(100, '1.0', {'Foo/Foo.toc': 'x'})
+    tui.c_install('raw:dev wowi:100')
+    assert tree(addons) == ['Foo', 'Foo/Foo.toc']
+    assert [addon['Name'] for addon in tui.core.config['Addons']] == ['Addon100']
+    assert ('Skipped' if tty else 'Refused: Raw') in output(tui)
+
+
+def test_installed_branch_addon_is_not_prompted(tui, raw_branch, prompts, monkeypatch, router, addons):
+    set_tty(monkeypatch, False)
+    tui.c_install('-u raw:dev')
+    requests = len(router.requests)
+    set_tty(monkeypatch, True)
+    prompts.answer(False)
+    tui.setup_table()
+    tui.c_install('raw:dev')
+    assert prompts == []
+    assert 'Already installed' in output(tui)
+    assert len(router.requests) == requests
+
+
+def test_branch_update_never_asks(tui, raw_branch, router, prompts, monkeypatch, addons):
+    set_tty(monkeypatch, True)
+    prompts.answer(True)
+    tui.c_install('raw:dev')
+    prompts.clear()
+    router.add('https://api.github.com/repos/owner/Raw/branches/main', {'commit': {'sha': '1234567890'}})
+    router.add(RAW_ARCHIVE, make_zip({'Raw-main/Raw/Raw.toc': 'new'}))
+    tui.setup_table()
+    tui.c_update('Raw')
+    assert (addons / 'Raw' / 'Raw.toc').read_text() == 'new'
+    router.add(RAW_ARCHIVE, make_zip({'Raw-main/Raw/Raw.toc': 'forced'}))
+    tui.c_force_update('Raw')
+    assert (addons / 'Raw' / 'Raw.toc').read_text() == 'forced'
+    assert prompts == []
+
+
+def test_release_install_never_asks(tui, github, prompts, monkeypatch):
+    set_tty(monkeypatch, True)
+    prompts.answer(False)
+    github('owner/Repo', 'v1.0', {'Repo/Repo.toc': 'x'})
+    tui.c_install('gh:owner/Repo')
+    assert prompts == []
+    assert 'Installed' in output(tui)
+
+
+def archive_requests(router):
+    return [request for request in router.requests if str(request.url) == RAW_ARCHIVE]
+
+
+def test_branch_install_with_trailing_slash_is_refused_without_tty(tui, router, raw_branch, prompts, monkeypatch):
+    set_tty(monkeypatch, False)
+    prompts.answer(True)
+    tui.c_install('raw:dev/')
+    assert 'Refused: Raw: branch install needs confirmation' in output(tui)
+    assert router.requests == []
+    assert prompts == []
+
+
+def test_addon_named_like_a_slashed_branch_does_not_confirm_it(tui, wowi, router, raw_branch, prompts, monkeypatch,
+                                                                addons):
+    wowi(100, '1.0', {'Foo/Foo.toc': 'x'})
+    tui.c_install('wowi:100')
+    tui.core.config['Addons'][0]['Name'] = 'raw:dev/'
+    set_tty(monkeypatch, False)
+    prompts.answer(True)
+    tui.setup_table()
+    tui.c_install('raw:dev/')
+    assert 'Refused: Raw: branch install needs confirmation' in output(tui)
+    assert archive_requests(router) == []
+    assert not (addons / 'Raw').exists()
+    assert prompts == []
+
+
+def test_branch_install_with_trailing_slash_declined_on_tty(tui, router, raw_branch, prompts, monkeypatch):
+    set_tty(monkeypatch, True)
+    prompts.answer(False)
+    tui.c_install('raw:dev/')
+    assert len(prompts) == 1
+    assert 'Skipped' in output(tui)
+    assert router.requests == []
+
+
+def test_unrecognised_branch_form_is_refused_by_core(tui, router, raw_branch, prompts, monkeypatch, addons):
+    set_tty(monkeypatch, True)
+    monkeypatch.setattr(tui, 'find_branch_source', lambda addon: None)
+    prompts.answer(True)
+    tui.c_install('raw:dev')
+    assert 'Refused: Raw: branch install needs confirmation' in output(tui)
+    assert archive_requests(router) == []
+    assert tree(addons) == []
+    assert prompts == []

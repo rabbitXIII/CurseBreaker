@@ -40,7 +40,7 @@ from packaging.version import Version
 from CB import is_addon_directory, __version__
 from CB.Search import identity_key, installed_keys
 from CB.Core import Core
-from CB.Verify import summarize, Refusal
+from CB.Verify import summarize, branch_source, Refusal, BRANCH_CONFIRMATION
 from CB.Wago import WagoUpdater
 from CB.Compat import clear, set_terminal_title, set_terminal_size, KBHit
 from CB.Resources import LOGO, HEADLESS_TERMINAL_THEME
@@ -548,21 +548,52 @@ class TUI:
             payload.append(addon['Slug'])
         return ' [bold white]|[/bold white] '.join(payload)
 
+    def find_branch_source(self, addon):
+        return branch_source(self.core.masterConfig['CustomRepository'], addon)
+
+    def confirm_branch_installs(self, addons, optunverified, exceptions):
+        return [addon for addon in addons if self.confirm_branch_install(addon, optunverified, exceptions)]
+
+    def confirm_branch_install(self, addon, optunverified, exceptions):
+        source = self.find_branch_source(addon)
+        if not source or self.core.check_if_installed(addon.removesuffix('/')):
+            return True
+        interactive = sys.stdin.isatty()
+        if optunverified or (interactive and self.ask_branch_install(source)):
+            return True
+        self.skip_branch_install(source, interactive, exceptions)
+        return False
+
+    def skip_branch_install(self, source, interactive, exceptions):
+        if interactive:
+            self.table.add_row('[bold black]Skipped[/bold black]', Text(source['Name'], no_wrap=True),
+                               Text('unverifiable branch install', no_wrap=True))
+        else:
+            exceptions.append(Refusal(BRANCH_CONFIRMATION, source['Name']))
+
+    def ask_branch_install(self, source):
+        return Confirm.ask(f'{source["Name"]} installs the "{source["Branch"]}" branch of {source["Repository"]}.\n'
+                           f'Branch archives change with every commit and publish no hash, so this download can\'t be '
+                           f'verified.\nInstall it anyway?', default=False, console=self.console)
+
     def c_install(self, args):
         if not args:
             self.console.print('[green]Usage:[/green]\n\tThis command accepts a space-separated list of links as an arg'
                                'ument.[bold white]\n\tFlags:[/bold white]\n\t\t[bold white]-i[/bold white] - Disable th'
                                'e client version check.\n\t\t[bold white]-a[/bold white] - Adopt existing directories n'
-                               'ot managed by CurseBreaker.\n[bold green]Supported URL:[/bold green]\n\thttps://addons.wago'
+                               'ot managed by CurseBreaker.\n\t\t[bold white]-u[/bold white] - Allow unverifiable b'
+                               'ranch installs (custom repository branches) without asking.\n'
+                               '[bold green]Supported URL:[/bold green]\n\thttps://addons.wago'
                                '.io/addons/\\[addon_name] [bold white]|[/bold white] wa:\\[addon_name]\n\thttps://www.w'
                                'owinterface.com/downloads/\\[addon_name] [bold white]|[/bold white] wowi:\\[addon_id]\n'
                                '\thttps://github.com/\\[username]/\\[repository_name] [bold white]|[/bold white] gh:\\['
                                'username]/\\[repository_name]\n\tElvUI [bold white]|[/bold white] Tukui\n\t' +
                                self.parse_custom_addons(), highlight=False)
             return
-        args, flags = self.parse_flags(args, ('-i', '-a'))
+        args, flags = self.parse_flags(args, ('-i', '-a', '-u'))
         optignore = '-i' in flags
         optadopt = '-a' in flags
+        optunverified = '-u' in flags
         self.core.reset_notices()
         args = re.sub(r'([a-zA-Z0-9_:])( +)([a-zA-Z0-9_:])', r'\1,\3', args)
         addons = [re.sub(r'[\[\]]', '', addon).strip() for addon in next(iter(reader([args], skipinitialspace=True)))]
@@ -575,13 +606,15 @@ class TUI:
                                            'imited. If the selected project offers multiple downloads this application '
                                            'will always install the retail version of the addon.')
                         break
+            addons = self.confirm_branch_installs(addons, optunverified, exceptions)
             with Progress('{task.completed}/{task.total}', '|', BarColumn(bar_width=None), '|', auto_refresh=False,
                           console=self.console) as progress:
                 task = progress.add_task('', total=len(addons))
-                while not progress.finished:
+                while addons and not progress.finished:
                     for addon in addons:
                         try:
-                            installed, name, version = self.core.add_addon(addon, optignore, optadopt)
+                            installed, name, version = self.core.add_addon(addon, optignore, optadopt,
+                                                                           bool(self.find_branch_source(addon)))
                             if installed:
                                 self.table.add_row('[green]Installed[/green]', Text(name, no_wrap=True),
                                                    Text(version, no_wrap=True))
@@ -1070,6 +1103,8 @@ class TUI:
                            'hite]Flags:[/bold white]\n\t'
                            '\t[bold white]-i[/bold white] - Disable the client version check.\n'
                            '\t\t[bold white]-a[/bold white] - Adopt existing directories not managed by CurseBreaker.\n'
+                           '\t\t[bold white]-u[/bold white] - Allow unverifiable branch installs (custom repository br'
+                           'anches) without asking.\n'
                            '[green]uninstall [URL/Name][/green]\n\tCommand accepts a space-separated list of addon name'
                            's or full links.\n\t[bold white]Flags:[/bold white]\n\t\t[bold white]-k[/bold white] - Keep'
                            ' the addon files after uninstalling.\n'
