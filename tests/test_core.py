@@ -305,7 +305,7 @@ def test_raw_branch_archive_exempt_from_tofu(core, router, addons):
     archive = 'https://github.com/owner/Raw/archive/refs/heads/main.zip'
     router.add(archive, make_zip({'Raw-main/Raw/Raw.toc': 'x', 'Raw-main/README.md': 'loose',
                                   'Raw-main/Other/x.lua': 'x'}))
-    core.add_addon('raw:dev', False)
+    core.add_addon('raw:dev', False, branch_confirmed=True)
     assert tree(addons) == ['Raw', 'Raw/Raw.toc']
     assert core.config['Addons'][0]['Lock']['Verified'] is None
     router.add(archive, make_zip({'Raw-main/Raw/Raw.toc': 'rebuilt'}))
@@ -453,3 +453,16 @@ def test_retry_retries_plain_runtime_error_and_adds_prefix():
     with pytest.raises(RuntimeError, match=r'^Failed to parse addon data: boom$'):
         fail()
     assert len(calls) == 2
+
+
+def test_core_refuses_unconfirmed_branch_archive(core, router, addons):
+    router.add('https://api.github.com/repos/owner/Raw/branches/main', {'commit': {'sha': 'abcdef0123'}})
+    archive = 'https://github.com/owner/Raw/archive/refs/heads/main.zip'
+    router.add(archive, make_zip({'Raw-main/Raw/Raw.toc': 'x'}))
+    for url in ('raw:dev', 'raw:dev/', 'RAW:DEV'):
+        with pytest.raises(Verify.Refusal, match=r'^Raw: branch install needs confirmation'):
+            core.add_addon(url, False)
+    assert [r for r in router.requests if str(r.url) == archive] == []
+    assert tree(addons) == []
+    core.add_addon('raw:dev', False, branch_confirmed=True)
+    assert tree(addons) == ['Raw', 'Raw/Raw.toc']
