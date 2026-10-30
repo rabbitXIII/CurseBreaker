@@ -246,14 +246,24 @@ class Core:
         return {directory: addon['Name'] for addon in self.config['Addons'] if addon is not current
                 for directory in addon['Directories']}
 
+    def companion_conflicts(self):
+        return Verify.ownership_conflicts([COMPANION], self.protected_directories(), self.directory_owners(), [], [],
+                                          False)
+
     def check_companion_ownership(self):
-        conflicts = Verify.ownership_conflicts([COMPANION], self.protected_directories(), self.directory_owners(),
-                                               [], [], False)
+        conflicts = self.companion_conflicts()
         if conflicts:
             raise RuntimeError(f'{COMPANION}.\nRefusing to install:\n' + '\n'.join(conflicts))
 
-    def record_companion(self):
+    def remove_companion(self):
+        if not self.companion_conflicts():
+            self.cleanup([COMPANION])
+
+    def record_companion(self, upgraded):
         self.verification.append((COMPANION, None, False))
+        if upgraded:
+            self.config['CBCompanionVersion'] = self.masterConfig['CBCompanionVersion']
+            self.save_config()
 
     def verify_install(self, new, current=None, adopt=False):
         if new.verifyWarning:

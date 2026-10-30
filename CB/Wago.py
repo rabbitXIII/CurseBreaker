@@ -216,7 +216,10 @@ class WagoUpdater:
     def download_companion(self):
         result = Verify.download(self.http, 'https://cursebreaker.acidweb.dev/CurseBreakerCompanion.zip', None,
                                  COMPANION)
-        return Verify.open_archive(result.content, COMPANION)
+        archive = Verify.open_archive(result.content, COMPANION)
+        if not any(name.startswith(f'{COMPANION}/') for name in archive.namelist()):
+            raise RuntimeError(f'{COMPANION}.\nArchive does not contain the {COMPANION} directory.')
+        return archive
 
     def install_companion(self, force):
         target_path = Path('Interface/AddOns/CurseBreakerCompanion')

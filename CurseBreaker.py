@@ -766,8 +766,7 @@ class TUI:
 
     def _c_toggle_wago(self, args):
         if args:
-            self.core.config['WagoSync'] = True
-            if args == self.core.config['WAUsername']:
+            if args == self.core.config['WAUsername'] and self.core.wago_sync_enabled():
                 self.console.print(f'Wago version check is now: [green]ENABLED[/green]\nEntries created by [bold white]'
                                    f'{self.core.config["WAUsername"]}[/bold white] are now included.')
                 self.core.config['WAUsername'] = ''
@@ -775,6 +774,7 @@ class TUI:
                 self.core.config['WAUsername'] = args.strip()
                 self.console.print(f'Wago version check is now: [green]ENABLED[/green]\nEntries created by [bold white]'
                                    f'{self.core.config["WAUsername"]}[/bold white] are now ignored.')
+            self.core.config['WagoSync'] = True
         elif not self.core.wago_sync_enabled():
             self.core.config['WagoSync'] = True
             if self.core.config['WAUsername'] == 'DISABLED':
@@ -783,7 +783,7 @@ class TUI:
         else:
             self.core.config['WagoSync'] = False
             self.core.config['WAUsername'] = 'DISABLED'
-            self.core.cleanup(['CurseBreakerCompanion'])
+            self.core.remove_companion()
             self.console.print('Wago version check is now: [red]DISABLED[/red]')
         self.core.save_config()
 
@@ -810,10 +810,10 @@ class TUI:
                                'to-date addons.\n\t[green]toggle pinning [Name][/green]\n\t\tCommand accepts an addon n'
                                'ame as argument.\n\t\tBlocks/unblocks updating of the provided addon.\n\t[green]toggle '
                                'sources[/green]\n\t\tEnables/disables the source column in the status table.\n\t[green]'
-                               'toggle wago [Username][/green]\n\t\tEnables/disables automatic Wago updates.\n\t\tOf'
-                               'f by default. When on, the IDs of installed WeakAuras and Plater profiles are sent to d'
-                               'ata.wago.io.\n\t\tIf a username is provided check will start to ignore the specified '
-                               'author.', highlight=False)
+                               'toggle wago [Username][/green]\n\t\tEnables/disables automatic Wago updates.\n\t\tOff b'
+                               'y default. When on, it sends installed WeakAuras/Plater IDs to data.wago.io\n\t\tand do'
+                               'wnloads the companion addon from cursebreaker.acidweb.dev.\n\t\tIf a username is provid'
+                               'ed check will start to ignore the specified author.', highlight=False)
             return
         args = args.strip()
         option, _, value = args.partition(' ')
@@ -952,13 +952,11 @@ class TUI:
         wago = WagoUpdater(self.core.config, self.core.http)
         if Version(__version__) >= Version(self.core.masterConfig['ConfigVersion']) and \
                 self.core.masterConfig['CBCompanionVersion'] > self.core.config['CBCompanionVersion']:
-            self.core.config['CBCompanionVersion'] = self.core.masterConfig['CBCompanionVersion']
-            self.core.save_config()
             force = True
         else:
             force = False
         if wago.install_companion(force):
-            self.core.record_companion()
+            self.core.record_companion(force)
         statuswa, statusplater, statusstash = wago.update()
         if verbose:
             if len(statusstash) > 0:
@@ -1065,8 +1063,9 @@ class TUI:
                            's/unblocks updating of the provided addon.\n'
                            '[green]toggle sources[/green]\n\tEnables/disables the source column in the status table.\n'
                            '[green]toggle wago [Username][/green]\n\tEnables/disables automatic Wago updates.\n\tOff by'
-                           ' default. When on, the IDs of installed WeakAuras and Plater profiles are sent to data.wago'
-                           '.io.\n\tIf a username is provided check will start to ignore the specified author.\n'
+                           ' default. When on, it sends installed WeakAuras/Plater IDs to data.wago.io\n\tand downloads'
+                           ' the companion addon from cursebreaker.acidweb.dev.\n\tIf a username is provided check will'
+                           ' start to ignore the specified author.\n'
                            '[green]set wago_addons_api [API key][/green]\n\tSets Wago Addons API key required to use Wa'
                            'go Addons as addon source.\n\tIt can be obtained here: [link=https://addons.wago.io/patreon'
                            ']https://addons.wago.io/patreon[/link]\n'

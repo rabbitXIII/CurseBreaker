@@ -1,6 +1,7 @@
 import json
 import httpx
 import pytest
+from CB import Verify
 from conftest import make_zip, output, tree
 
 COMPANION_URL = 'https://cursebreaker.acidweb.dev/CurseBreakerCompanion.zip'
@@ -90,6 +91,29 @@ def test_toggle_on_clears_disabled_username(tui):
     assert tui.core.config['WAUsername'] == ''
 
 
+def test_toggle_username_while_off_sets_filter(tui):
+    tui.core.config.update({'WagoSync': False, 'WAUsername': 'Someone'})
+    tui.c_toggle('wago Someone')
+    assert tui.core.wago_sync_enabled() is True
+    assert tui.core.config['WAUsername'] == 'Someone'
+
+
+def test_toggle_username_while_on_clears_filter(tui):
+    tui.core.config.update({'WagoSync': True, 'WAUsername': 'Someone'})
+    tui.c_toggle('wago Someone')
+    assert tui.core.config['WAUsername'] == ''
+
+
+def test_toggle_off_keeps_companion_owned_by_managed_addon(tui, addons):
+    enable(tui)
+    tui.core.config['Addons'].append({'Name': 'Squatter', 'Directories': ['CurseBreakerCompanion']})
+    (addons / 'CurseBreakerCompanion').mkdir()
+    (addons / 'CurseBreakerCompanion' / 'theirs.lua').write_text('theirs')
+    tui.c_toggle('wago')
+    assert tui.core.config['WagoSync'] is False
+    assert (addons / 'CurseBreakerCompanion' / 'theirs.lua').read_text() == 'theirs'
+
+
 def test_toggle_off_keeps_protected_companion(tui, addons):
     enable(tui)
     tui.core.protect_directories(['CurseBreakerCompanion'])
@@ -137,16 +161,51 @@ def test_traversal_archive_is_refused_and_keeps_old_companion(wago, router, addo
     assert not (addons.parent.parent / 'evil.lua').exists()
 
 
-def test_failed_download_keeps_old_companion(wago, router, addons):
+def old_companion(wago, addons):
     enable(wago)
     wago.core.masterConfig['CBCompanionVersion'] = 1
     (addons / 'CurseBreakerCompanion').mkdir()
     (addons / 'CurseBreakerCompanion' / 'old.lua').write_text('old')
-    router.add(COMPANION_URL, b'gone', status=404)
+
+
+@pytest.mark.parametrize('status', [404, 503])
+def test_failed_download_keeps_old_companion_and_is_retried(wago, router, addons, status):
+    old_companion(wago, addons)
+    router.add(COMPANION_URL, b'gone', status=status)
     with pytest.raises(httpx.HTTPStatusError):
         wago.c_wago_update(None)
     assert tree(addons / 'CurseBreakerCompanion') == ['old.lua']
     assert (addons / 'CurseBreakerCompanion' / 'old.lua').read_text() == 'old'
+    assert wago.core.config['CBCompanionVersion'] == 0
+    with pytest.raises(httpx.HTTPStatusError):
+        wago.c_wago_update(None)
+    assert len(requested(router, COMPANION_URL)) == 2
+
+
+def test_forced_update_records_companion_version(wago, addons):
+    old_companion(wago, addons)
+    wago.c_wago_update(None)
+    assert tree(addons / 'CurseBreakerCompanion') == ['CurseBreakerCompanion.toc', 'Data.lua']
+    assert wago.core.config['CBCompanionVersion'] == 1
+
+
+def test_archive_without_companion_folder_keeps_old_companion(wago, router, addons):
+    old_companion(wago, addons)
+    router.add(COMPANION_URL, make_zip({'Other/x.lua': 'other'}))
+    with pytest.raises(RuntimeError, match='does not contain the CurseBreakerCompanion directory'):
+        wago.c_wago_update(None)
+    assert tree(addons / 'CurseBreakerCompanion') == ['old.lua']
+    assert not (addons / 'Other').exists()
+    assert wago.core.config['CBCompanionVersion'] == 0
+
+
+def test_oversized_companion_keeps_old_companion(wago, router, addons):
+    old_companion(wago, addons)
+    router.add(COMPANION_URL, b'small', headers={'Content-Length': str(Verify.MAX_ARCHIVE_BYTES + 1)})
+    with pytest.raises(RuntimeError, match='size limit'):
+        wago.c_wago_update(None)
+    assert tree(addons / 'CurseBreakerCompanion') == ['old.lua']
+    assert wago.core.config['CBCompanionVersion'] == 0
 
 
 def test_protected_companion_is_refused_before_any_request(wago, router, addons):
