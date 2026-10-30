@@ -212,7 +212,7 @@ def reinstall_after_republish(core, wowi, files=None):
 
 
 def test_lock_survives_uninstall_and_refuses_replaced_file(core, wowi, addons):
-    with pytest.raises(RuntimeError, match='replaced the file'):
+    with pytest.raises(Verify.Refusal, match='replaced the file'):
         reinstall_after_republish(core, wowi)
     assert tree(addons) == []
     assert core.config['Addons'] == []
@@ -228,7 +228,7 @@ def test_lock_matches_the_same_source_under_another_url(core, wowi, addons):
     core.add_addon('https://www.wowinterface.com/downloads/info100-Foo.html', False)
     core.del_addon('https://www.wowinterface.com/downloads/info100-Foo.html', False)
     wowi(100, '1.0', {'Foo/Foo.toc': 'replaced'})
-    with pytest.raises(RuntimeError, match='replaced the file'):
+    with pytest.raises(Verify.Refusal, match='replaced the file'):
         core.add_addon('wowi:100', False)
     assert tree(addons) == []
 
@@ -242,7 +242,7 @@ def test_lock_history_is_seeded_from_entries_of_an_older_config(core, wowi, addo
     assert core.config['LockHistory']
     core.del_addon(WOWI, False)
     wowi(100, '1.0', {'Foo/Foo.toc': 'replaced'})
-    with pytest.raises(RuntimeError, match='replaced the file'):
+    with pytest.raises(Verify.Refusal, match='replaced the file'):
         core.add_addon('wowi:100', False)
     assert tree(addons) == []
 
@@ -252,7 +252,7 @@ def test_lock_matches_github_case_variants(core, github, addons):
     core.add_addon('gh:Owner/Repo', False)
     core.del_addon('https://github.com/Owner/Repo', False)
     github('owner/repo', 'v1.0', {'Repo/Repo.toc': 'replaced'})
-    with pytest.raises(RuntimeError, match='replaced the file'):
+    with pytest.raises(Verify.Refusal, match='replaced the file'):
         core.add_addon('https://github.com/owner/repo', False)
     assert tree(addons) == []
 
@@ -263,7 +263,7 @@ def test_forced_downgrade_to_a_republished_version_refused(core, wowi, addons):
     wowi(100, '2.0', {'Foo/Foo.toc': 'new'})
     core.update_addon(WOWI, True, False)
     wowi(100, '1.0', {'Foo/Foo.toc': 'republished'})
-    with pytest.raises(RuntimeError, match='replaced the file'):
+    with pytest.raises(Verify.Refusal, match='replaced the file'):
         core.update_addon(WOWI, True, True)
     assert (addons / 'Foo' / 'Foo.toc').read_text() == 'new'
     assert core.config['Addons'][0]['Version'] == '2.0'
