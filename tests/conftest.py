@@ -65,6 +65,7 @@ def client_dir(tmp_path, monkeypatch):
     (tmp_path / 'WTF').mkdir()
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv('CURSEBREAKER_INSECURE_SKIP_VERIFY', raising=False)
+    monkeypatch.delenv('CURSEBREAKER_DEBUG', raising=False)
     return tmp_path
 
 
