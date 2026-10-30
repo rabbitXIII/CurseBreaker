@@ -218,7 +218,7 @@ class WagoUpdater:
                                  COMPANION)
         archive = Verify.open_archive(result.content, COMPANION)
         if not any(name.startswith(f'{COMPANION}/') for name in archive.namelist()):
-            raise Verify.Refusal(f'Archive does not contain the {COMPANION} directory.', COMPANION)
+            raise RuntimeError(f'{COMPANION}.\nArchive does not contain the {COMPANION} directory.')
         return archive
 
     def install_companion(self, force):

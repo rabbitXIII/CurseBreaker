@@ -192,8 +192,9 @@ def test_forced_update_records_companion_version(wago, addons):
 def test_archive_without_companion_folder_keeps_old_companion(wago, router, addons):
     old_companion(wago, addons)
     router.add(COMPANION_URL, make_zip({'Other/x.lua': 'other'}))
-    with pytest.raises(Verify.Refusal, match='Companion: Archive does not contain the CurseBreakerCompanion directory'):
+    with pytest.raises(RuntimeError, match='does not contain the CurseBreakerCompanion directory') as error:
         wago.c_wago_update(None)
+    assert not isinstance(error.value, Verify.Refusal)
     assert tree(addons / 'CurseBreakerCompanion') == ['old.lua']
     assert not (addons / 'Other').exists()
     assert wago.core.config['CBCompanionVersion'] == 0
