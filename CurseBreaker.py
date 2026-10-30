@@ -47,6 +47,12 @@ from CB.Resources import LOGO, HEADLESS_TERMINAL_THEME
 if platform.system() == 'Windows':
     from ctypes import windll, wintypes
 
+EXPECTED_ERRORS = (RuntimeError, NotImplementedError, httpx.HTTPError)
+
+
+def describe_error(e):
+    return str(e) or str(e.__cause__ or '') or e.__class__.__name__
+
 
 class TUI:
     def __init__(self):
@@ -304,11 +310,20 @@ class TUI:
             width = 100
         if isinstance(e, list):
             for es in e:
-                self.console.print(Traceback.from_exception(exc_type=es.__class__, exc_value=es,
-                                                            traceback=es.__traceback__, width=width))
+                self.print_exception(es, width)
+        else:
+            self.print_exception(e, width)
+
+    def print_exception(self, e, width):
+        if self.is_expected_error(e):
+            self.console.print(f'[bold red]{escape(describe_error(e))}[/bold red]', highlight=False)
         else:
             self.console.print(Traceback.from_exception(exc_type=e.__class__, exc_value=e,
                                                         traceback=e.__traceback__, width=width))
+
+    @staticmethod
+    def is_expected_error(e):
+        return isinstance(e, EXPECTED_ERRORS) and 'CURSEBREAKER_DEBUG' not in os.environ
 
     def _handle_keypress_console(self, count, msg, countdown=None):
         kb = KBHit()
@@ -1006,7 +1021,8 @@ class TUI:
         self.console.print(f'{payload}\n\nThe command above was copied to the clipboard.', highlight=False)
 
     def c_help(self, _):
-        self.console.print('[green]install [URL][/green]\n\tCommand accepts a space-separated list of links.\n\t[bold w'
+        self.console.print('[green]install [URL][/green]\n\tCommand accepts a space-separated list of links.\n\tGitHub '
+                           'projects can be installed directly with gh:owner/repo or the full GitHub link.\n\t[bold w'
                            'hite]Flags:[/bold white]\n\t'
                            '\t[bold white]-i[/bold white] - Disable the client version check.\n'
                            '\t\t[bold white]-a[/bold white] - Adopt existing directories not managed by CurseBreaker.\n'
