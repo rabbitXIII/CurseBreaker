@@ -253,7 +253,7 @@ class Core:
     def check_companion_ownership(self):
         conflicts = self.companion_conflicts()
         if conflicts:
-            raise RuntimeError(f'{COMPANION}.\nRefusing to install:\n' + '\n'.join(conflicts))
+            raise Verify.Refusal('\n'.join(conflicts), COMPANION)
 
     def remove_companion(self):
         if not self.companion_conflicts():

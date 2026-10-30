@@ -218,7 +218,7 @@ class WagoUpdater:
                                  COMPANION)
         archive = Verify.open_archive(result.content, COMPANION)
         if not any(name.startswith(f'{COMPANION}/') for name in archive.namelist()):
-            raise RuntimeError(f'{COMPANION}.\nArchive does not contain the {COMPANION} directory.')
+            raise Verify.Refusal(f'Archive does not contain the {COMPANION} directory.', COMPANION)
         return archive
 
     def install_companion(self, force):
@@ -226,7 +226,7 @@ class WagoUpdater:
         if not os.path.isdir(target_path) or force:
             archive = self.download_companion()
             shutil.rmtree(target_path, ignore_errors=True)
-            Verify.safe_extract(archive, 'Interface/AddOns', [COMPANION])
+            Verify.safe_extract(archive, 'Interface/AddOns', [COMPANION], COMPANION)
             return True
         return False
 

@@ -155,7 +155,7 @@ def test_traversal_archive_is_refused_and_keeps_old_companion(wago, router, addo
     (addons / 'CurseBreakerCompanion').mkdir()
     (addons / 'CurseBreakerCompanion' / 'old.lua').write_text('old')
     router.add(COMPANION_URL, make_zip({'CurseBreakerCompanion/../../evil.lua': 'evil'}))
-    with pytest.raises(RuntimeError, match='path traversal'):
+    with pytest.raises(Verify.Refusal, match='path traversal'):
         wago.c_wago_update(None)
     assert tree(addons / 'CurseBreakerCompanion') == ['old.lua']
     assert not (addons.parent.parent / 'evil.lua').exists()
@@ -192,7 +192,7 @@ def test_forced_update_records_companion_version(wago, addons):
 def test_archive_without_companion_folder_keeps_old_companion(wago, router, addons):
     old_companion(wago, addons)
     router.add(COMPANION_URL, make_zip({'Other/x.lua': 'other'}))
-    with pytest.raises(RuntimeError, match='does not contain the CurseBreakerCompanion directory'):
+    with pytest.raises(Verify.Refusal, match='Companion: Archive does not contain the CurseBreakerCompanion directory'):
         wago.c_wago_update(None)
     assert tree(addons / 'CurseBreakerCompanion') == ['old.lua']
     assert not (addons / 'Other').exists()
@@ -202,7 +202,7 @@ def test_archive_without_companion_folder_keeps_old_companion(wago, router, addo
 def test_oversized_companion_keeps_old_companion(wago, router, addons):
     old_companion(wago, addons)
     router.add(COMPANION_URL, b'small', headers={'Content-Length': str(Verify.MAX_ARCHIVE_BYTES + 1)})
-    with pytest.raises(RuntimeError, match='size limit'):
+    with pytest.raises(Verify.Refusal, match='size limit'):
         wago.c_wago_update(None)
     assert tree(addons / 'CurseBreakerCompanion') == ['old.lua']
     assert wago.core.config['CBCompanionVersion'] == 0
@@ -213,7 +213,7 @@ def test_protected_companion_is_refused_before_any_request(wago, router, addons)
     wago.core.protect_directories(['CurseBreakerCompanion'])
     (addons / 'CurseBreakerCompanion').mkdir()
     (addons / 'CurseBreakerCompanion' / 'mine.lua').write_text('mine')
-    with pytest.raises(RuntimeError, match='protected'):
+    with pytest.raises(Verify.Refusal, match='CurseBreakerCompanion: CurseBreakerCompanion is a protected'):
         wago.c_wago_update(None)
     assert router.requests == []
     assert tree(addons / 'CurseBreakerCompanion') == ['mine.lua']
@@ -222,7 +222,20 @@ def test_protected_companion_is_refused_before_any_request(wago, router, addons)
 def test_companion_owned_by_managed_addon_is_refused(wago, router, addons):
     enable(wago)
     wago.core.config['Addons'].append({'Name': 'Squatter', 'Directories': ['CurseBreakerCompanion']})
-    with pytest.raises(RuntimeError, match='belongs to Squatter'):
+    with pytest.raises(Verify.Refusal, match='belongs to Squatter'):
         wago.c_wago_update(None)
     assert router.requests == []
     assert not (addons / 'CurseBreakerCompanion').exists()
+
+
+def test_companion_refusal_prints_one_message(wago, addons):
+    enable(wago)
+    wago.core.protect_directories(['CurseBreakerCompanion'])
+    (addons / 'CurseBreakerCompanion').mkdir()
+    with pytest.raises(Verify.Refusal) as info:
+        wago.c_wago_update(None)
+    wago.handle_exception(info.value, False)
+    text = output(wago)
+    assert 'Refused: CurseBreakerCompanion: CurseBreakerCompanion is a protected directory.' in text
+    assert 'Refusing to install' not in text
+    assert 'Traceback' not in text
