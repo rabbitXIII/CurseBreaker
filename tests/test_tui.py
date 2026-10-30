@@ -143,4 +143,96 @@ def test_error_message_is_not_parsed_as_markup(tui):
 def test_help_documents_direct_github_install(tui, monkeypatch):
     monkeypatch.setattr(tui, 'parse_custom_addons', lambda: '')
     tui.c_help(None)
-    assert 'gh:owner/repo' in output(tui)
+    assert 'gh:[username]/[repository_name]' in output(tui)
+
+
+def test_error_message_keeps_emoji_codes_literal(tui):
+    tui.handle_exception(raised(RuntimeError('wowi:100:dev :warning:')), False)
+    assert output(tui) == 'wowi:100:dev :warning:\n'
+
+
+def test_notices_keep_emoji_codes_literal(tui):
+    tui.core.notices.append('see :100: and :warning:')
+    tui.print_notices()
+    assert 'see :100: and :warning:' in output(tui)
+
+
+def test_recursion_error_keeps_traceback(tui):
+    tui.handle_exception(raised(RecursionError()), False)
+    assert 'Traceback' in output(tui)
+
+
+def test_verify_mismatch_prints_full_refusal(tui, wowi):
+    wowi(100, '1.0', {'Foo/Foo.toc': 'x'}, uimd5='0' * 32)
+    tui.c_install('wowi:100')
+    text = output(tui)
+    assert 'failed md5 verification' in text
+    assert 'Expected:' in text
+    assert 'Actual:' in text
+    assert 'Traceback' not in text
+
+
+@pytest.fixture
+def break_downloads(tui, router):
+    def handler(request):
+        if request.url.path.endswith('.zip'):
+            raise httpx.ConnectError('Network is unreachable')
+        return router(request)
+
+    def apply():
+        tui.core.http = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
+    yield apply
+    tui.core.http.close()
+
+
+def test_install_network_error_prints_one_message(tui, wowi, break_downloads):
+    wowi(100, '1.0', {'Foo/Foo.toc': 'x'})
+    break_downloads()
+    tui.c_install('wowi:100')
+    text = output(tui)
+    assert 'Network is unreachable' in text
+    assert 'Traceback' not in text
+
+
+def test_update_network_error_prints_one_message(tui, wowi, break_downloads):
+    wowi(100, '1.0', {'Foo/Foo.toc': 'x'})
+    tui.c_install('wowi:100')
+    wowi(100, '2.0', {'Foo/Foo.toc': 'y'})
+    break_downloads()
+    tui.setup_table()
+    tui.c_update(None)
+    text = output(tui)
+    assert 'Network is unreachable' in text
+    assert 'Traceback' not in text
+
+
+def raising(error):
+    def fail(*_):
+        raise error
+    return fail
+
+
+def test_master_config_failure_prints_message_and_exits(tui, monkeypatch):
+    monkeypatch.setattr(tui.core, 'init_master_config', raising(RuntimeError('offline')))
+    monkeypatch.setattr(tui, 'handle_keypress', lambda *_: None)
+    with pytest.raises(SystemExit):
+        tui.load_master_config()
+    assert 'offline' in output(tui)
+
+
+def test_master_config_bug_is_reraised(tui, monkeypatch):
+    monkeypatch.setattr(tui.core, 'init_master_config', raising(KeyError('x')))
+    with pytest.raises(KeyError):
+        tui.load_master_config()
+
+
+def test_motd_network_error_prints_message_and_continues(tui, monkeypatch):
+    monkeypatch.setattr(tui, 'motd_parser', raising(httpx.ConnectError('motd down')))
+    tui.show_motd()
+    assert output(tui) == 'motd down\n'
+
+
+def test_motd_bug_is_reraised(tui, monkeypatch):
+    monkeypatch.setattr(tui, 'motd_parser', raising(KeyError('x')))
+    with pytest.raises(KeyError):
+        tui.show_motd()
