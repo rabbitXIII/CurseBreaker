@@ -1,8 +1,9 @@
 import sys
+import httpx
 import pytest
 from rich.console import Console
 from CurseBreaker import TUI
-from conftest import tree
+from conftest import make_zip, tree
 
 
 @pytest.fixture
@@ -79,3 +80,201 @@ def test_auto_update_is_disabled(tui, monkeypatch):
     monkeypatch.setattr(sys, 'frozen', True, raising=False)
     monkeypatch.setattr(tui.core, 'http', None)
     assert tui.auto_update() is None
+
+
+def raised(error):
+    with pytest.raises(type(error)) as info:
+        raise error
+    return info.value
+
+
+def test_unsupported_url_prints_one_message(tui):
+    tui.c_install('ftp://nope:')
+    text = output(tui)
+    assert 'Provided URL is not supported.' in text
+    assert 'Traceback' not in text
+
+
+def test_verify_refusal_prints_one_message(tui, wowi):
+    tui.c_protect('Foo')
+    wowi(100, '1.0', {'Foo/Foo.toc': 'x'})
+    tui.c_install('wowi:100')
+    text = output(tui)
+    assert 'Refused: Addon100: Foo is a protected directory.' in text
+    assert 'Failed to parse addon data' not in text
+    assert 'Traceback' not in text
+
+
+def test_network_error_prints_one_message(tui):
+    tui.handle_exception(raised(httpx.ConnectError('boom')), False)
+    assert output(tui) == 'boom\n'
+
+
+def test_genuine_bug_prints_traceback(tui):
+    tui.handle_exception(raised(KeyError('x')), False)
+    assert 'Traceback' in output(tui)
+
+
+def test_debug_variable_restores_traceback(tui, monkeypatch):
+    monkeypatch.setenv('CURSEBREAKER_DEBUG', '1')
+    tui.handle_exception(raised(RuntimeError('expected')), False)
+    assert 'Traceback' in output(tui)
+
+
+def test_error_list_prints_each_message(tui):
+    tui.handle_exception([raised(RuntimeError('first')), raised(RuntimeError('second'))], False)
+    text = output(tui)
+    assert 'first' in text and 'second' in text
+    assert 'Traceback' not in text
+
+
+def test_empty_error_falls_back_to_cause_then_class_name(tui):
+    with pytest.raises(RuntimeError) as info:
+        raise RuntimeError from ValueError('bad json')
+    tui.handle_exception(info.value, False)
+    tui.handle_exception(raised(RuntimeError()), False)
+    assert output(tui) == 'bad json\nRuntimeError\n'
+
+
+def test_error_message_is_not_parsed_as_markup(tui):
+    tui.handle_exception(raised(RuntimeError('[bold]raw[/bold]')), False)
+    assert output(tui) == '[bold]raw[/bold]\n'
+
+
+def test_help_documents_direct_github_install(tui, monkeypatch):
+    monkeypatch.setattr(tui, 'parse_custom_addons', lambda: '')
+    tui.c_help(None)
+    assert 'installed directly with gh:[username]/[repository_name]' in output(tui)
+
+
+def test_error_message_keeps_emoji_codes_literal(tui):
+    tui.handle_exception(raised(RuntimeError('wowi:100:dev :warning:')), False)
+    assert output(tui) == 'wowi:100:dev :warning:\n'
+
+
+def test_notices_keep_emoji_codes_literal(tui):
+    tui.core.notices.append('see :100: and :warning:')
+    tui.print_notices()
+    assert 'see :100: and :warning:' in output(tui)
+
+
+def test_recursion_error_keeps_traceback(tui):
+    tui.handle_exception(raised(RecursionError()), False)
+    assert 'Traceback' in output(tui)
+
+
+def test_verify_mismatch_prints_full_refusal(tui, wowi):
+    wowi(100, '1.0', {'Foo/Foo.toc': 'x'}, uimd5='0' * 32)
+    tui.c_install('wowi:100')
+    text = output(tui)
+    assert 'Refused: Addon100: Downloaded file failed md5 verification.' in text
+    assert 'Failed to parse addon data' not in text
+    assert 'Expected:' in text
+    assert 'Actual:' in text
+    assert 'Traceback' not in text
+
+
+@pytest.fixture
+def break_downloads(tui, router):
+    def handler(request):
+        if request.url.path.endswith('.zip'):
+            raise httpx.ConnectError('Network is unreachable')
+        return router(request)
+
+    def apply():
+        tui.core.http = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
+    yield apply
+    tui.core.http.close()
+
+
+def test_install_network_error_prints_one_message(tui, wowi, break_downloads):
+    wowi(100, '1.0', {'Foo/Foo.toc': 'x'})
+    break_downloads()
+    tui.c_install('wowi:100')
+    text = output(tui)
+    assert 'Network is unreachable' in text
+    assert 'Traceback' not in text
+
+
+def test_update_network_error_prints_one_message(tui, wowi, break_downloads):
+    wowi(100, '1.0', {'Foo/Foo.toc': 'x'})
+    tui.c_install('wowi:100')
+    wowi(100, '2.0', {'Foo/Foo.toc': 'y'})
+    break_downloads()
+    tui.setup_table()
+    tui.c_update(None)
+    text = output(tui)
+    assert 'Network is unreachable' in text
+    assert 'Traceback' not in text
+
+
+def raising(error):
+    def fail(*_):
+        raise error
+    return fail
+
+
+def test_master_config_failure_prints_message_and_exits(tui, monkeypatch):
+    monkeypatch.setattr(tui.core, 'init_master_config', raising(RuntimeError('offline')))
+    tui.headless = True
+    with pytest.raises(SystemExit):
+        tui.load_master_config()
+    assert 'offline' in output(tui)
+
+
+def test_master_config_bug_is_reraised(tui, monkeypatch):
+    monkeypatch.setattr(tui.core, 'init_master_config', raising(KeyError('x')))
+    with pytest.raises(KeyError):
+        tui.load_master_config()
+
+
+def test_motd_network_error_prints_message_and_continues(tui, monkeypatch):
+    monkeypatch.setattr(tui, 'motd_parser', raising(httpx.ConnectError('motd down')))
+    tui.show_motd()
+    assert output(tui) == 'motd down\n'
+
+
+def test_motd_bug_is_reraised(tui, monkeypatch):
+    monkeypatch.setattr(tui, 'motd_parser', raising(KeyError('x')))
+    with pytest.raises(KeyError):
+        tui.show_motd()
+
+
+def test_archive_refusal_prints_one_message(tui, wowi):
+    wowi(100, '1.0', {'Foo/Foo.toc': 'x', '../evil.lua': 'x'})
+    tui.c_install('wowi:100')
+    text = output(tui)
+    assert 'Refused: Addon100: Archive contains a path traversal: ../evil.lua' in text
+    assert 'Failed to parse addon data' not in text
+    assert 'Traceback' not in text
+
+
+def test_symlink_refusal_prints_one_message(tui, wowi):
+    content = make_zip({'Foo/Foo.toc': 'x'}, symlinks=[('Foo/link', '/etc')])
+    wowi(100, '1.0', {}, content=content)
+    tui.c_install('wowi:100')
+    text = output(tui)
+    assert 'Refused: Addon100: Archive contains a symlink: Foo/link' in text
+    assert 'Failed to parse addon data' not in text
+    assert 'Traceback' not in text
+
+
+def test_lock_mismatch_prints_one_message(tui, wowi):
+    wowi(100, '1.0', {'Foo/Foo.toc': 'x'})
+    tui.core.add_addon('wowi:100', False)
+    wowi(100, '1.0', {'Foo/Foo.toc': 'replaced'})
+    tui.setup_table()
+    tui.c_update('Addon100', force=True)
+    text = output(tui)
+    assert 'Refused: Addon100: The publisher replaced the file for version 1.0.' in text
+    assert 'Failed to parse addon data' not in text
+    assert 'Traceback' not in text
+
+
+def test_corrupt_download_prints_parse_error_not_refusal(tui, wowi):
+    wowi(100, '1.0', {}, content=b'<html>')
+    tui.c_install('wowi:100')
+    text = output(tui)
+    assert 'Failed to parse addon data: Addon100.\nDownloaded file is not a valid ZIP archive.' in text
+    assert 'Refused:' not in text
+    assert 'Traceback' not in text

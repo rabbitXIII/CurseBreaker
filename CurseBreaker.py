@@ -39,13 +39,27 @@ from prompt_toolkit.completion import WordCompleter, NestedCompleter
 from packaging.version import Version
 from CB import is_addon_directory, __version__
 from CB.Core import Core
-from CB.Verify import summarize
+from CB.Verify import summarize, Refusal
 from CB.Wago import WagoUpdater
 from CB.Compat import clear, set_terminal_title, set_terminal_size, KBHit
 from CB.Resources import LOGO, HEADLESS_TERMINAL_THEME
 
 if platform.system() == 'Windows':
     from ctypes import windll, wintypes
+
+EXPECTED_ERROR_TYPES = (RuntimeError, NotImplementedError, Refusal)
+
+
+def describe_error(e):
+    if isinstance(e, Refusal):
+        return f'Refused: {e}'
+    return str(e) or str(e.__cause__ or '') or e.__class__.__name__
+
+
+def is_expected_error(e):
+    if 'CURSEBREAKER_DEBUG' in os.environ:
+        return False
+    return type(e) in EXPECTED_ERROR_TYPES or isinstance(e, httpx.HTTPError)
 
 
 class TUI:
@@ -68,7 +82,7 @@ class TUI:
             self.headless = True
         self.setup_console()
         self.print_header()
-        self.core.init_master_config()
+        self.load_master_config()
         # Check if executable is in good location
         if (not glob.glob('World*.app') and not glob.glob('Wow*.exe')) or \
                 not os.path.isdir(Path('Interface/AddOns')) or not os.path.isdir('WTF'):
@@ -159,7 +173,7 @@ class TUI:
                 if not self.headless:
                     self.print_header()
                 try:
-                    self.motd_parser()
+                    self.show_motd()
                     self.c_update(None, True)
                     if self.core.backup_check():
                         self.setup_table()
@@ -199,7 +213,7 @@ class TUI:
                                't needs to added to application configuration by using [green]set wago_addons_api[/gree'
                                'n] command.\nCommand [green]import[/green] might be used to detect already installed ad'
                                'dons.')
-        self.motd_parser()
+        self.show_motd()
         if self.core.backup_check():
             self.console.print('[green]Backing up WTF directory:[/green]')
             self.core.backup_wtf(self.console)
@@ -282,6 +296,22 @@ class TUI:
             self._auto_update_cleanup()
             sys.exit(1)
 
+    def load_master_config(self):
+        try:
+            self.core.init_master_config()
+        except Exception as e:
+            if not is_expected_error(e):
+                raise
+            self.handle_shutdown(f'[bold red]{escape(describe_error(e))}[/bold red]\n')
+
+    def show_motd(self):
+        try:
+            self.motd_parser()
+        except Exception as e:
+            if not is_expected_error(e):
+                raise
+            self.print_error(e)
+
     def motd_parser(self):
         if detect_legacy_windows():
             self.console.print(Panel('The old Windows terminal was detected. Use of the new Windows Terminal is highly '
@@ -304,11 +334,19 @@ class TUI:
             width = 100
         if isinstance(e, list):
             for es in e:
-                self.console.print(Traceback.from_exception(exc_type=es.__class__, exc_value=es,
-                                                            traceback=es.__traceback__, width=width))
+                self.print_exception(es, width)
+        else:
+            self.print_exception(e, width)
+
+    def print_exception(self, e, width):
+        if is_expected_error(e):
+            self.print_error(e)
         else:
             self.console.print(Traceback.from_exception(exc_type=e.__class__, exc_value=e,
                                                         traceback=e.__traceback__, width=width))
+
+    def print_error(self, e):
+        self.console.print(f'[bold red]{escape(describe_error(e))}[/bold red]', highlight=False, emoji=False)
 
     def _handle_keypress_console(self, count, msg, countdown=None):
         kb = KBHit()
@@ -366,11 +404,11 @@ class TUI:
     def print_notices(self):
         summary, alert = summarize(self.core.verification)
         if summary:
-            self.console.print(f'\n{escape(summary)}', highlight=False)
+            self.console.print(f'\n{escape(summary)}', highlight=False, emoji=False)
         if alert:
-            self.console.print(f'[bold red]{escape(alert)}[/bold red]', highlight=False)
+            self.console.print(f'[bold red]{escape(alert)}[/bold red]', highlight=False, emoji=False)
         for notice in self.core.notices:
-            self.console.print(f'\n[bold yellow]{escape(notice)}[/bold yellow]', highlight=False)
+            self.console.print(f'\n[bold yellow]{escape(notice)}[/bold yellow]', highlight=False, emoji=False)
 
     def print_author_reminder(self):
         if random.randint(1, 10) != 1:
@@ -1006,7 +1044,9 @@ class TUI:
         self.console.print(f'{payload}\n\nThe command above was copied to the clipboard.', highlight=False)
 
     def c_help(self, _):
-        self.console.print('[green]install [URL][/green]\n\tCommand accepts a space-separated list of links.\n\t[bold w'
+        self.console.print('[green]install [URL][/green]\n\tCommand accepts a space-separated list of links.\n\tGitHub '
+                           'projects can be installed directly with gh:\\[username]/\\[repository_name] or the full'
+                           ' GitHub link.\n\t[bold w'
                            'hite]Flags:[/bold white]\n\t'
                            '\t[bold white]-i[/bold white] - Disable the client version check.\n'
                            '\t\t[bold white]-a[/bold white] - Adopt existing directories not managed by CurseBreaker.\n'

@@ -1,6 +1,7 @@
 import json
+import httpx
 import pytest
-from CB import Verify
+from CB import Verify, retry
 from conftest import make_zip, sha256, gh_release, tree
 
 WOWI = 'https://www.wowinterface.com/downloads/info100.html'
@@ -26,7 +27,7 @@ def test_wowi_md5_verified_install(core, wowi, addons, client_dir):
 
 def test_wowi_md5_mismatch_installs_nothing(core, wowi, addons):
     wowi(100, '1.0', {'Foo/Foo.toc': 'x'}, uimd5='0' * 32)
-    with pytest.raises(RuntimeError, match='failed md5 verification'):
+    with pytest.raises(Verify.Refusal, match='failed md5 verification'):
         core.add_addon('wowi:100', False)
     assert tree(addons) == []
     assert core.config['Addons'] == []
@@ -59,7 +60,7 @@ def test_github_sha256_verified_install(core, github, addons):
 
 def test_github_sha256_mismatch(core, github, addons):
     github('owner/Repo', 'v1.0', {'Repo/Repo.toc': 'x'}, digest='sha256:' + 'f' * 64)
-    with pytest.raises(RuntimeError, match='failed sha256 verification'):
+    with pytest.raises(Verify.Refusal, match='failed sha256 verification'):
         core.add_addon('gh:owner/Repo', False)
     assert tree(addons) == []
 
@@ -88,7 +89,7 @@ def test_github_graphql_cache_carries_digest(core, router, addons, tamper):
     assert 'digest' in json.loads(router.requests[0].content)['query']
     assert core.githubCache['owner/Repo'][0]['assets'][0]['digest'] == f'sha256:{sha256(content)}'
     if tamper:
-        with pytest.raises(RuntimeError, match='failed sha256 verification'):
+        with pytest.raises(Verify.Refusal, match='failed sha256 verification'):
             core.add_addon(GH, False)
         assert tree(addons) == []
     else:
@@ -102,7 +103,7 @@ def test_protected_directory_refused_even_with_adopt(core, wowi, addons):
     (addons / 'MyStuff' / 'keep.lua').write_text('mine')
     core.protect_directories(['MyStuff'])
     wowi(100, '1.0', {'Foo/Foo.toc': 'x', 'mystuff/evil.lua': 'evil'})
-    with pytest.raises(RuntimeError, match='mystuff is a protected directory'):
+    with pytest.raises(Verify.Refusal, match='mystuff is a protected directory'):
         core.add_addon('wowi:100', False, adopt=True)
     assert tree(addons) == ['MyStuff', 'MyStuff/keep.lua']
 
@@ -111,7 +112,7 @@ def test_directory_owned_by_other_addon_refused(core, wowi, github, addons):
     wowi(100, '1.0', {'Foo/Foo.toc': 'x'})
     core.add_addon('wowi:100', False)
     github('owner/Repo', 'v1.0', {'Repo/Repo.toc': 'x', 'Foo/evil.lua': 'evil'})
-    with pytest.raises(RuntimeError, match='Foo belongs to Addon100'):
+    with pytest.raises(Verify.Refusal, match='Foo belongs to Addon100'):
         core.add_addon('gh:owner/Repo', False, adopt=True)
     assert (addons / 'Foo' / 'evil.lua').exists() is False
 
@@ -120,7 +121,7 @@ def test_unmanaged_directory_refused_without_adopt(core, wowi, addons):
     (addons / 'Local').mkdir()
     (addons / 'Local' / 'keep.lua').write_text('mine')
     wowi(100, '1.0', {'Foo/Foo.toc': 'x', 'Local/evil.lua': 'evil'})
-    with pytest.raises(RuntimeError, match='Local already exists and is not managed'):
+    with pytest.raises(Verify.Refusal, match='Local already exists and is not managed'):
         core.add_addon('wowi:100', False)
     assert tree(addons) == ['Local', 'Local/keep.lua']
     assert core.config['Addons'] == []
@@ -140,7 +141,7 @@ def test_update_with_new_unmanaged_directory_refused_even_forced(core, wowi, add
     (addons / 'Local').mkdir()
     wowi(100, '1.1', {'Foo/Foo.toc': 'y', 'Local/evil.lua': 'evil'})
     for force in (False, True):
-        with pytest.raises(RuntimeError, match='Local already exists'):
+        with pytest.raises(Verify.Refusal, match='Local already exists'):
             core.update_addon(WOWI, True, force)
     assert (addons / 'Foo' / 'Foo.toc').read_text() == 'x'
     assert list((addons / 'Local').iterdir()) == []
@@ -177,7 +178,7 @@ def test_tofu_same_version_different_hash_refused(core, wowi, addons):
     wowi(100, '1.0', {'Foo/Foo.toc': 'x'})
     core.add_addon('wowi:100', False)
     wowi(100, '1.0', {'Foo/Foo.toc': 'replaced'})
-    with pytest.raises(RuntimeError, match=r'publisher replaced the file for version 1\.0'):
+    with pytest.raises(Verify.Refusal, match=r'publisher replaced the file for version 1\.0'):
         core.update_addon(WOWI, True, True)
     assert (addons / 'Foo' / 'Foo.toc').read_text() == 'x'
 
@@ -191,13 +192,15 @@ def test_tofu_same_version_same_hash_allowed(core, wowi, addons):
 
 
 def test_tofu_insecure_env_allows_with_notice(core, wowi, addons, monkeypatch):
-    wowi(100, '1.0', {'Foo/Foo.toc': 'x'})
+    locked = wowi(100, '1.0', {'Foo/Foo.toc': 'x'})
     core.add_addon('wowi:100', False)
-    wowi(100, '1.0', {'Foo/Foo.toc': 'replaced'})
+    replaced = wowi(100, '1.0', {'Foo/Foo.toc': 'replaced'})
     monkeypatch.setenv(Verify.INSECURE_ENV, '1')
     core.update_addon(WOWI, True, True)
     assert (addons / 'Foo' / 'Foo.toc').read_text() == 'replaced'
-    assert any('publisher replaced the file' in notice for notice in core.notices)
+    assert core.notices[-1] == ('WARNING: Addon100.\nThe publisher replaced the file for version 1.0.\n'
+                                f'Locked SHA256: {sha256(locked)}\nDownloaded SHA256: {sha256(replaced)}\n'
+                                'Installed anyway because CURSEBREAKER_INSECURE_SKIP_VERIFY=1.')
 
 
 def reinstall_after_republish(core, wowi, files=None):
@@ -364,6 +367,87 @@ def test_wago_install_goes_through_guard(core, router, addons):
                                               'supported_patches': ['11.2.0'], 'label': '1.0'}}})
     router.add(url, make_zip({'Foo/Foo.toc': 'x', 'Local/evil.lua': 'x'}))
     (addons / 'Local').mkdir()
-    with pytest.raises(RuntimeError, match='Local already exists'):
+    with pytest.raises(Verify.Refusal, match='Local already exists'):
         core.add_addon('wa:foo', False)
     assert tree(addons) == ['Local']
+
+
+def download_requests(router, suffix):
+    return [request for request in router.requests if str(request.url).endswith(suffix)]
+
+
+def test_wowi_hash_mismatch_downloads_once(core, wowi, router):
+    wowi(100, '1.0', {'Foo/Foo.toc': 'x'}, uimd5='0' * 32)
+    with pytest.raises(Verify.Refusal):
+        core.add_addon('wowi:100', False)
+    assert len(download_requests(router, '/1.0.zip')) == 1
+
+
+def test_github_hash_mismatch_downloads_once(core, github, router):
+    github('owner/Repo', 'v1.0', {'Repo/Repo.toc': 'x'}, digest=f'sha256:{"0" * 64}')
+    with pytest.raises(Verify.Refusal):
+        core.add_addon(GH, False)
+    assert len(download_requests(router, '/releases/assets/1')) == 1
+
+
+def test_ownership_refusal_message_lists_conflicts_for_addon(core, wowi, addons):
+    (addons / 'Local').mkdir()
+    wowi(100, '1.0', {'Local/Local.toc': 'x'})
+    with pytest.raises(Verify.Refusal) as error:
+        core.add_addon('wowi:100', False)
+    assert str(error.value) == ('Addon100: Local already exists and is not managed by CurseBreaker. '
+                                'Install with -a to adopt it.')
+
+
+def test_http_error_still_retries_with_parse_prefix(core, wowi, router):
+    wowi(100, '1.0', {'Foo/Foo.toc': 'x'})
+    router.add('https://cdn.wowinterface.com/downloads/file100/1.0.zip', b'down', status=500)
+    with pytest.raises(RuntimeError, match=r'^Failed to parse addon data: ') as error:
+        core.add_addon('wowi:100', False)
+    assert not isinstance(error.value, Verify.Refusal)
+    assert len(download_requests(router, '/1.0.zip')) == 2
+
+
+def test_transport_error_still_retries_with_parse_prefix(core, wowi, router):
+    wowi(100, '1.0', {'Foo/Foo.toc': 'x'})
+    router.fail('https://cdn.wowinterface.com/downloads/file100/1.0.zip', httpx.ConnectError('unreachable'))
+    with pytest.raises(RuntimeError, match=r'^Failed to parse addon data: unreachable$') as error:
+        core.add_addon('wowi:100', False)
+    assert not isinstance(error.value, Verify.Refusal)
+    assert len(download_requests(router, '/1.0.zip')) == 2
+
+
+def test_corrupt_download_still_retries_with_parse_prefix(core, wowi, router):
+    wowi(100, '1.0', {}, content=b'<html>', uimd5=True)
+    with pytest.raises(RuntimeError, match=r'^Failed to parse addon data: [\s\S]*not a valid ZIP') as error:
+        core.add_addon('wowi:100', False)
+    assert not isinstance(error.value, Verify.Refusal)
+    assert len(download_requests(router, '/1.0.zip')) == 2
+
+
+def test_retry_reraises_refusal_immediately():
+    refusal = Verify.Refusal('nope', 'Foo')
+    calls = []
+
+    @retry()
+    def refuse():
+        calls.append(1)
+        raise refusal
+
+    with pytest.raises(Verify.Refusal) as error:
+        refuse()
+    assert error.value is refusal
+    assert len(calls) == 1
+
+
+def test_retry_retries_plain_runtime_error_and_adds_prefix():
+    calls = []
+
+    @retry()
+    def fail():
+        calls.append(1)
+        raise RuntimeError('boom')
+
+    with pytest.raises(RuntimeError, match=r'^Failed to parse addon data: boom$'):
+        fail()
+    assert len(calls) == 2

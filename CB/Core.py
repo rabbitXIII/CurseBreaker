@@ -257,18 +257,18 @@ class Core:
         conflicts = Verify.ownership_conflicts(new.directories, self.protected_directories(), owners,
                                                current['Directories'] if current else [], os.listdir(self.path), adopt)
         if conflicts:
-            raise RuntimeError(f'{new.name}.\nRefusing to install:\n' + '\n'.join(conflicts))
+            raise Verify.Refusal('\n'.join(conflicts), new.name)
 
     def check_lock(self, new, url):
         if isinstance(new, GitHubAddonRaw):
             return
         locked = Verify.locked_sha256(self.lock_history(), url, new.currentVersion)
         if locked and locked != new.sha256:
-            message = (f'{new.name}.\nThe publisher replaced the file for version {new.currentVersion}.\n'
-                       f'Locked SHA256: {locked}\nDownloaded SHA256: {new.sha256}')
+            reason = (f'The publisher replaced the file for version {new.currentVersion}.\n'
+                      f'Locked SHA256: {locked}\nDownloaded SHA256: {new.sha256}')
             if not Verify.insecure():
-                raise RuntimeError(message)
-            self.notices.append(f'WARNING: {message}\nInstalled anyway because {Verify.INSECURE_ENV}=1.')
+                raise Verify.Refusal(reason, new.name)
+            self.notices.append(f'WARNING: {new.name}.\n{reason}\nInstalled anyway because {Verify.INSECURE_ENV}=1.')
 
     def record_install(self, new, url, entry):
         if 'Directories' in entry and set(new.directories) != set(entry['Directories']):
