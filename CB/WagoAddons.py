@@ -1,9 +1,7 @@
-import io
 import httpx
-import zipfile
 from dateutil import parser
 from json import JSONDecodeError
-from . import clean_name, parse_directories, retry, APIAuth
+from . import clean_name, parse_directories, retry, APIAuth, Verify
 
 
 class WagoAddonsAddon:
@@ -54,6 +52,9 @@ class WagoAddonsAddon:
         self.directories = []
         self.author = self.payload['authors']
         self.ignoreUpdate = False
+        self.expectedHash = None
+        self.verified = None
+        self.sha256 = None
         self.get_current_version()
 
     def get_current_version(self):
@@ -83,11 +84,10 @@ class WagoAddonsAddon:
 
     @retry()
     def get_addon(self):
-        self.archive = zipfile.ZipFile(io.BytesIO(self.http.get(self.downloadUrl, auth=APIAuth('Bearer', self.apiKey))
-                                                  .content))
+        self.archive = Verify.fetch(self, self.downloadUrl, auth=APIAuth('Bearer', self.apiKey))
         self.directories = parse_directories(self.archive.namelist())
         if not self.directories:
             raise RuntimeError(f'{self.name}.\nProject package is corrupted or incorrectly packaged.')
 
     def install(self, path):
-        self.archive.extractall(path)
+        Verify.safe_extract(self.archive, path, self.directories)

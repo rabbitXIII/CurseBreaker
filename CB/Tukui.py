@@ -1,6 +1,4 @@
-import io
-import zipfile
-from . import clean_name, parse_directories, retry
+from . import clean_name, parse_directories, retry, Verify
 
 
 class TukuiAddon:
@@ -22,13 +20,16 @@ class TukuiAddon:
         self.author = [self.payload['author']]
         self.ignoreUpdate = False
         self.changelogUrl = self.payload['changelog_url']
+        self.expectedHash = None
+        self.verified = None
+        self.sha256 = None
 
     @retry()
     def get_addon(self):
-        self.archive = zipfile.ZipFile(io.BytesIO(self.http.get(self.downloadUrl).content))
+        self.archive = Verify.fetch(self, self.downloadUrl)
         self.directories = parse_directories(self.archive.namelist(), self.directories)
         if not self.directories:
             raise RuntimeError(f'{self.name}.\nProject package is corrupted or incorrectly packaged.')
 
     def install(self, path):
-        self.archive.extractall(path)
+        Verify.safe_extract(self.archive, path, self.directories)

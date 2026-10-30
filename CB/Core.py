@@ -588,7 +588,7 @@ class Core:
         query = ('{\n  "query": "{ search( type: REPOSITORY query: \\"' + f'repo:{" repo:".join(ids)}' + ' fork:true\\"'
                  ' first: 100 ) { nodes { ... on Repository { nameWithOwner releases(first: 15) { nodes { tag_name: tag'
                  'Name name html_url: url draft: isDraft prerelease: isPrerelease assets: releaseAssets(first: 100) { n'
-                 'odes { node_id: id name content_type: contentType url } } } } } } }}"\n'
+                 'odes { node_id: id name content_type: contentType url digest } } } } } } }}"\n'
                  '}')
         payload = self.http.post('https://api.github.com/graphql', json=json.loads(query),
                                  auth=APIAuth('Bearer', self.config['GHAPIKey']), timeout=15)

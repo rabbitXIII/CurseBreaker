@@ -1,8 +1,6 @@
-import io
 import re
 import httpx
-import zipfile
-from . import clean_name, parse_directories, retry
+from . import clean_name, parse_directories, retry, Verify
 
 
 class WoWInterfaceAddon:
@@ -31,13 +29,16 @@ class WoWInterfaceAddon:
         self.directories = []
         self.author = [self.payload['UIAuthorName']]
         self.ignoreUpdate = self.payload['UIPending'] == "1"
+        self.expectedHash = ('md5', self.payload['UIMD5']) if self.payload.get('UIMD5') else None
+        self.verified = None
+        self.sha256 = None
 
     @retry()
     def get_addon(self):
-        self.archive = zipfile.ZipFile(io.BytesIO(self.http.get(self.downloadUrl).content))
+        self.archive = Verify.fetch(self, self.downloadUrl)
         self.directories = parse_directories(self.archive.namelist())
         if not self.directories:
             raise RuntimeError(f'{self.name}.\nProject package is corrupted or incorrectly packaged.')
 
     def install(self, path):
-        self.archive.extractall(path)
+        Verify.safe_extract(self.archive, path, self.directories)

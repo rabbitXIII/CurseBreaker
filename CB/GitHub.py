@@ -1,8 +1,6 @@
-import io
 import httpx
 import shutil
-import zipfile
-from . import parse_directories, retry, APIAuth
+from . import parse_directories, retry, APIAuth, Verify
 
 
 class GitHubAddon:
@@ -50,6 +48,9 @@ class GitHubAddon:
         self.author = [project.split('/')[0]]
         self.ignoreUpdate = False
         self.releaseDepth = 0
+        self.expectedHash = None
+        self.verified = None
+        self.sha256 = None
         self.parse()
 
     def parse(self):
@@ -62,6 +63,7 @@ class GitHubAddon:
             self.get_latest_package()
         else:
             self.get_latest_package_nometa()
+        self.expectedHash = Verify.asset_digest(self.payloads[self.releaseDepth]['assets'], self.downloadUrl)
 
     def parse_metadata(self):
         for release in self.payloads[self.releaseDepth]['assets']:
@@ -147,9 +149,8 @@ class GitHubAddon:
 
     @retry()
     def get_addon(self):
-        self.archive = zipfile.ZipFile(io.BytesIO(
-            self.http.get(self.downloadUrl, headers={'Accept': 'application/octet-stream'},
-                          auth=APIAuth('Bearer', self.apiKey)).content))
+        self.archive = Verify.fetch(self, self.downloadUrl, headers={'Accept': 'application/octet-stream'},
+                                    auth=APIAuth('Bearer', self.apiKey))
         for file in self.archive.namelist():
             if file.lower().endswith('.toc') and '/' not in file:
                 raise RuntimeError(f'{self.name}.\nProject package is corrupted or incorrectly packaged.')
@@ -158,7 +159,7 @@ class GitHubAddon:
             raise RuntimeError(f'{self.name}.\nProject package is corrupted or incorrectly packaged.')
 
     def install(self, path):
-        self.archive.extractall(path)
+        Verify.safe_extract(self.archive, path, self.directories)
 
 
 class GitHubAddonRaw:
@@ -196,15 +197,17 @@ class GitHubAddonRaw:
         self.directories = addon['Directories']
         self.author = addon['Authors']
         self.ignoreUpdate = False
+        self.expectedHash = None
+        self.verified = None
+        self.sha256 = None
 
     @retry()
     def get_addon(self):
-        self.archive = zipfile.ZipFile(io.BytesIO(self.http.get(self.downloadUrl).content))
+        self.archive = Verify.fetch(self, self.downloadUrl)
 
     def install(self, path):
         for directory in self.directories:
             shutil.rmtree(path / directory, ignore_errors=True)
         for file in self.archive.infolist():
             file.filename = file.filename.replace(f'{self.shorthPath}-{self.branch}/', '')
-            if any(f in file.filename for f in self.directories):
-                self.archive.extract(file, path)
+        Verify.safe_extract(self.archive, path, self.directories)
