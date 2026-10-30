@@ -73,7 +73,7 @@ def test_insecure_env_warning_text_is_exact(router, http, monkeypatch):
     result = Verify.download(http, URL, ('md5', '0' * 32), name='Foo')
     assert result.warning == (f'WARNING: Foo.\nDownloaded file failed md5 verification.\nURL: {URL}\n'
                               f'Expected: {"0" * 32}\nActual: {md5(b"data")}\n'
-                              f'Installed anyway because CURSEBREAKER_INSECURE_SKIP_VERIFY=1.')
+                              'Installed anyway because CURSEBREAKER_INSECURE_SKIP_VERIFY=1.')
 
 
 def test_parse_digest():
