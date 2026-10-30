@@ -19,6 +19,7 @@ from rich.progress import Progress, BarColumn
 from . import is_addon_directory, retry, APIAuth, Verify, __version__
 from .Tukui import TukuiAddon
 from .GitHub import GitHubAddon, GitHubAddonRaw
+from .Wago import COMPANION
 from .WagoAddons import WagoAddonsAddon
 from .WoWInterface import WoWInterfaceAddon
 
@@ -238,12 +239,27 @@ class Core:
         self.notices = []
         self.verification = []
 
+    def wago_sync_enabled(self):
+        return self.config.get('WagoSync') is True and self.config['WAUsername'] != 'DISABLED'
+
+    def directory_owners(self, current=None):
+        return {directory: addon['Name'] for addon in self.config['Addons'] if addon is not current
+                for directory in addon['Directories']}
+
+    def check_companion_ownership(self):
+        conflicts = Verify.ownership_conflicts([COMPANION], self.protected_directories(), self.directory_owners(),
+                                               [], [], False)
+        if conflicts:
+            raise RuntimeError(f'{COMPANION}.\nRefusing to install:\n' + '\n'.join(conflicts))
+
+    def record_companion(self):
+        self.verification.append((COMPANION, None, False))
+
     def verify_install(self, new, current=None, adopt=False):
         if new.verifyWarning:
             self.notices.append(new.verifyWarning)
-        owners = {directory: addon['Name'] for addon in self.config['Addons'] if addon is not current
-                  for directory in addon['Directories']}
-        conflicts = Verify.ownership_conflicts(new.directories, self.protected_directories(), owners,
+        conflicts = Verify.ownership_conflicts(new.directories, self.protected_directories(),
+                                               self.directory_owners(current),
                                                current['Directories'] if current else [], os.listdir(self.path), adopt)
         if conflicts:
             raise RuntimeError(f'{new.name}.\nRefusing to install:\n' + '\n'.join(conflicts))

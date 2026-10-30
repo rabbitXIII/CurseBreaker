@@ -7,6 +7,7 @@ A fork of [AcidWeb/CurseBreaker](https://github.com/AcidWeb/CurseBreaker) that c
 - **Archive limits.** 100 MiB download, 20000 members, 1 GiB uncompressed. Symlinks, absolute paths and `..` traversal are rejected, and loose top-level files are never written into `AddOns`.
 - **Folder ownership.** An addon may only write its own folders. A folder owned by another managed addon is refused, and so is an existing folder CurseBreaker doesn't manage (for example a personal addon you are developing) unless you install with `-a` to adopt it. `protect DIR [DIR...]` marks folders that are never written or deleted, even by `force_update`. `protect` lists them and `protect -r DIR` removes the protection.
 - **No silent downgrades.** If the new version is older than the installed one, `update` skips it and says so. Use `force_update` to install it anyway.
+- **Wago aura sync is opt-in.** Off by default; `toggle wago` turns it on, and then the IDs of installed WeakAuras and Plater profiles are sent to data.wago.io and the CurseBreakerCompanion addon (no published hash, reported as unverified) is installed through the same archive limits and folder guards.
 - **No self-update.** Upstream binaries would replace this fork with an unverified build, so the fork runs from source.
 
 Setting `CURSEBREAKER_INSECURE_SKIP_VERIFY=1` turns hash and lock mismatches into warnings. Use it only to recover from a known-good republish.
@@ -82,7 +83,7 @@ Both classic and fine-grained tokens are supported. No additional permissions ar
 Token can be added to application by using the `set gh_api` command.
 
 ## WEAKAURAS SUPPORT
-**CurseBreaker** by default will try to update all detected WeakAuras and Plater profiles/scripts. The process works the same as WeakAuras Companion.\
+Once enabled with `toggle wago`, **CurseBreaker** will try to update all detected WeakAuras and Plater profiles/scripts. The process works the same as WeakAuras Companion.\
 All updates will still need to be applied in-game in the WeakAuras/Plater option menu.\
 Command `toggle wago` can be used to set a single author name that will be ignored during the update.\
 Additionally Wago API key can be set with the `set wa_api` command so non-public entries will also be upgradeable.

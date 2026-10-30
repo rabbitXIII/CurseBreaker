@@ -165,7 +165,7 @@ class TUI:
                         self.setup_table()
                         self.console.print(f'\n[green]Backing up WTF directory{"!" if self.headless else ":"}[/green]')
                         self.core.backup_wtf(None if self.headless else self.console)
-                    if self.core.config['WAUsername'] != 'DISABLED':
+                    if self.core.wago_sync_enabled():
                         self.console.print('')
                         with nullcontext() if self.headless else self.console.status('Processing Wago data'):
                             self.setup_table()
@@ -766,6 +766,7 @@ class TUI:
 
     def _c_toggle_wago(self, args):
         if args:
+            self.core.config['WagoSync'] = True
             if args == self.core.config['WAUsername']:
                 self.console.print(f'Wago version check is now: [green]ENABLED[/green]\nEntries created by [bold white]'
                                    f'{self.core.config["WAUsername"]}[/bold white] are now included.')
@@ -774,12 +775,15 @@ class TUI:
                 self.core.config['WAUsername'] = args.strip()
                 self.console.print(f'Wago version check is now: [green]ENABLED[/green]\nEntries created by [bold white]'
                                    f'{self.core.config["WAUsername"]}[/bold white] are now ignored.')
-        elif self.core.config['WAUsername'] == 'DISABLED':
-            self.core.config['WAUsername'] = ''
+        elif not self.core.wago_sync_enabled():
+            self.core.config['WagoSync'] = True
+            if self.core.config['WAUsername'] == 'DISABLED':
+                self.core.config['WAUsername'] = ''
             self.console.print('Wago version check is now: [green]ENABLED[/green]')
         else:
+            self.core.config['WagoSync'] = False
             self.core.config['WAUsername'] = 'DISABLED'
-            shutil.rmtree(Path('Interface/AddOns/CurseBreakerCompanion'), ignore_errors=True)
+            self.core.cleanup(['CurseBreakerCompanion'])
             self.console.print('Wago version check is now: [red]DISABLED[/red]')
         self.core.save_config()
 
@@ -806,8 +810,10 @@ class TUI:
                                'to-date addons.\n\t[green]toggle pinning [Name][/green]\n\t\tCommand accepts an addon n'
                                'ame as argument.\n\t\tBlocks/unblocks updating of the provided addon.\n\t[green]toggle '
                                'sources[/green]\n\t\tEnables/disables the source column in the status table.\n\t[green]'
-                               'toggle wago [Username][/green]\n\t\tEnables/disables automatic Wago updates.\n\t\tIf a '
-                               'username is provided check will start to ignore the specified author.', highlight=False)
+                               'toggle wago [Username][/green]\n\t\tEnables/disables automatic Wago updates.\n\t\tOf'
+                               'f by default. When on, the IDs of installed WeakAuras and Plater profiles are sent to d'
+                               'ata.wago.io.\n\t\tIf a username is provided check will start to ignore the specified '
+                               'author.', highlight=False)
             return
         args = args.strip()
         option, _, value = args.partition(' ')
@@ -931,12 +937,18 @@ class TUI:
             self.console.print(f'[link={aura[1]}]{aura[0]}[/link]', highlight=False)
 
     def c_wago_update(self, _, verbose=True, flush=True):
+        if not self.core.wago_sync_enabled():
+            self.console.print('Wago sync is disabled. Enable it with the [bold white]toggle wago[/bold white] comman'
+                               'd.')
+            return
         if not os.path.isdir(Path('Interface/AddOns/WeakAuras')) and not os.path.isdir(Path('Interface/AddOns/Plater')):
             if verbose:
                 self.console.print('No compatible addon is installed.')
             return
         if not self._c_wago_update_init(flush, verbose):
             return
+        self.core.reset_notices()
+        self.core.check_companion_ownership()
         wago = WagoUpdater(self.core.config, self.core.http)
         if Version(__version__) >= Version(self.core.masterConfig['ConfigVersion']) and \
                 self.core.masterConfig['CBCompanionVersion'] > self.core.config['CBCompanionVersion']:
@@ -945,7 +957,8 @@ class TUI:
             force = True
         else:
             force = False
-        wago.install_companion(force)
+        if wago.install_companion(force):
+            self.core.record_companion()
         statuswa, statusplater, statusstash = wago.update()
         if verbose:
             if len(statusstash) > 0:
@@ -968,6 +981,7 @@ class TUI:
             if len(statusplater[0]) > 0:
                 self.console.print(f'\n[green]The number of outdated Plater profiles/scripts:[/green] '
                                    f'{len(statusplater[0])}', highlight=False)
+        self.print_notices()
 
     def c_search(self, args):
         if not args:
@@ -1019,7 +1033,8 @@ class TUI:
                            'ames or full links.\n\tSelected addons will be reinstalled or updated regardless of their c'
                            'urrent state.\n\tIf no argument is provided all addons will be forcefully updated.\n'
                            '[green]wago_update[/green]\n\tCommand detects all installed WeakAuras and Plater profiles/s'
-                           'cripts.\n\tAnd then generate WeakAuras Companion payload.\n'
+                           'cripts.\n\tAnd then generate WeakAuras Companion payload.\n\tRequires [bold white]toggle w'
+                           'ago[/bold white].\n'
                            '[green]status[/green]\n\tPrints the current state of all installed addons.\n\t[bold yellow]'
                            '[!][/bold yellow] mark means that the latest release is not updated yet for the current WoW'
                            ' version.\n\t[bold white]Flags:[/bold white]\n\t\t[bold white]-a[/bold white] - Temporary r'
@@ -1049,8 +1064,9 @@ class TUI:
                            '[green]toggle pinning [Name][/green]\n\tCommand accepts an addon name as argument.\n\tBlock'
                            's/unblocks updating of the provided addon.\n'
                            '[green]toggle sources[/green]\n\tEnables/disables the source column in the status table.\n'
-                           '[green]toggle wago [Username][/green]\n\tEnables/disables automatic Wago updates.\n\tIf a u'
-                           'sername is provided check will start to ignore the specified author.\n'
+                           '[green]toggle wago [Username][/green]\n\tEnables/disables automatic Wago updates.\n\tOff by'
+                           ' default. When on, the IDs of installed WeakAuras and Plater profiles are sent to data.wago'
+                           '.io.\n\tIf a username is provided check will start to ignore the specified author.\n'
                            '[green]set wago_addons_api [API key][/green]\n\tSets Wago Addons API key required to use Wa'
                            'go Addons as addon source.\n\tIt can be obtained here: [link=https://addons.wago.io/patreon'
                            ']https://addons.wago.io/patreon[/link]\n'

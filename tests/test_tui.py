@@ -1,23 +1,5 @@
 import sys
-import pytest
-from rich.console import Console
-from CurseBreaker import TUI
-from conftest import tree
-
-
-@pytest.fixture
-def tui(core):
-    instance = object.__new__(TUI)
-    instance.core = core
-    instance.console = Console(record=True, width=200, color_system=None)
-    instance.headless = False
-    instance.os = 'Darwin'
-    instance.setup_table()
-    return instance
-
-
-def output(tui):
-    return tui.console.export_text(clear=False)
+from conftest import tree, output
 
 
 def test_install_adopt_flag_reaches_core(tui, wowi, addons):
