@@ -1,7 +1,9 @@
+import re
 import httpx
 import pytest
 import test_tui
 from datetime import UTC, datetime
+from CB.Search import SearchResult, identity_key
 
 tui = test_tui.tui
 output = test_tui.output
@@ -29,7 +31,7 @@ def search_url(query, per_page=30):
 
 
 def releases_url(full_name):
-    return str(httpx.URL(f'https://api.github.com/repos/{full_name}/releases', params={'per_page': 1}))
+    return str(httpx.URL(f'https://api.github.com/repos/{full_name}/releases', params={'per_page': 10}))
 
 
 @pytest.fixture
@@ -42,8 +44,8 @@ def free(router):
     return publish
 
 
-def release_with(*assets):
-    return [{'tag_name': 'v1', 'assets': list(assets)}]
+def release_with(*assets, **flags):
+    return {'tag_name': 'v1', 'draft': False, 'prerelease': False, 'assets': list(assets), **flags}
 
 
 def hosts(router):
@@ -53,7 +55,7 @@ def hosts(router):
 def test_no_key_prints_wowi_and_github_results(tui, router, free):
     free('bar', wowi=[wowi_entry(7, 'Bar Frames', day='2024-03-05')],
          repos=[gh_repo('owner/BarAddon')],
-         releases={'owner/BarAddon': release_with({'digest': 'sha256:abc'})})
+         releases={'owner/BarAddon': [release_with({'digest': 'sha256:abc'})]})
     tui.c_search('bar')
     text = output(tui)
     assert 'Top results of your search:' in text
@@ -96,10 +98,11 @@ def test_topics_match_when_description_does_not(tui, free):
 
 
 @pytest.mark.parametrize(('release', 'status', 'marker'), [
-    (release_with({'digest': 'sha256:abc'}), 200, ' [verified]'),
-    (release_with({'digest': None}), 200, ' [unverified]'),
+    ([release_with({'digest': 'sha256:abc'})], 200, ' [verified]'),
+    ([release_with({'digest': None})], 200, ' [unverified]'),
     ([], 200, ' [no release]'),
     ({'message': 'boom'}, 500, ''),
+    ({'message': 'not a list'}, 200, ''),
 ])
 def test_digest_markers(tui, router, free, release, status, marker):
     free('bar', repos=[gh_repo('owner/Bar')])
@@ -166,9 +169,10 @@ def test_both_sources_failing_raises_with_both_reasons(tui, router):
     assert 'GitHub search failed (HTTP 429).' in str(error.value)
 
 
-def test_installed_wowi_addon_is_marked(tui, wowi, free):
+@pytest.mark.parametrize('url', ['wowi:100', 'https://www.wowinterface.com/downloads/info100-Foo.html'])
+def test_installed_wowi_addon_is_marked(tui, wowi, free, url):
     wowi(100, '1.0', {'Foo/Foo.toc': 'x'})
-    tui.core.add_addon('wowi:100', False)
+    tui.core.add_addon(url, False)
     free('addon', wowi=[wowi_entry(100, 'Addon100'), wowi_entry(101, 'Addon101')])
     tui.c_search('addon')
     lines = output(tui).splitlines()
@@ -176,12 +180,16 @@ def test_installed_wowi_addon_is_marked(tui, wowi, free):
     assert any(line.startswith('wowi:101') and 'Installed' not in line for line in lines)
 
 
-def test_installed_github_addon_is_marked(tui, github, free):
-    github('owner/Repo', 'v1.0', {'Repo/Repo.toc': 'x'})
-    tui.core.add_addon('gh:owner/Repo', False)
-    free('repo', repos=[gh_repo('owner/Repo')], releases={'owner/Repo': release_with({'digest': 'sha256:abc'})})
+@pytest.mark.parametrize('url', ['gh:owner/repo', 'https://github.com/owner/repo'])
+def test_installed_github_addon_is_marked_ignoring_case(tui, github, free, url):
+    github('owner/repo', 'v1.0', {'Repo/Repo.toc': 'x'})
+    tui.core.add_addon(url, False)
+    free('repo', repos=[gh_repo('Owner/Repo'), gh_repo('Other/Repo')],
+         releases={'Owner/Repo': [release_with({'digest': 'sha256:abc'})], 'Other/Repo': []})
     tui.c_search('repo')
-    assert any(line.startswith('gh:owner/Repo') and line.endswith('[Installed]') for line in output(tui).splitlines())
+    lines = output(tui).splitlines()
+    assert any(line.startswith('gh:Owner/Repo') and line.endswith('[Installed]') for line in lines)
+    assert any(line.startswith('gh:Other/Repo') and 'Installed' not in line for line in lines)
 
 
 def test_wago_key_uses_wago_search_and_no_free_requests(tui, router):
@@ -203,3 +211,185 @@ def test_remote_names_print_literally(tui, free):
     assert 'gh:owner/[red]x [red]x GitHub' in text
 
 
+def test_remote_dates_print_literally(tui, free):
+    free('bar', repos=[gh_repo('owner/Bar', pushed_at='[/]x'), gh_repo('owner/Baz', pushed_at='2025-02-03[/]')],
+         releases={'owner/Bar': [], 'owner/Baz': []})
+    tui.c_search('bar')
+    text = output(tui)
+    assert 'gh:owner/Bar Bar GitHub  [no release]' in text
+    assert 'gh:owner/Baz Baz GitHub 2025-02-03 [no release]' in text
+
+
+def test_line_escapes_every_remote_field(tui):
+    result = SearchResult('gh:[a]', 'https://github.com/x/y', '[b]', '[c]', '[d]', 'e')
+    tui.console.print(tui.free_search_line(result, set()), highlight=False, emoji=False)
+    assert 'gh:[a] [b] [c] [d] [e]' in output(tui)
+
+
+def test_control_characters_are_stripped_from_remote_names(tui, free):
+    free('bar', wowi=[wowi_entry(7, 'Bar\x1b[2JFrames\x07')], repos=[gh_repo('owner/Ba\x1br\x00')],
+         releases={'owner/Bar': []})
+    tui.c_search('bar')
+    text = output(tui)
+    assert 'wowi:7 Bar[2JFrames WoWInterface' in text
+    assert 'gh:owner/Bar Bar GitHub' in text
+    assert not any(char in text for char in '\x1b\x07\x00')
+
+
+def test_wowi_names_are_unescaped_and_matched_unescaped(tui, free):
+    free('new & improved', wowi=[wowi_entry(7, 'Bar new &amp; improved'), wowi_entry(8, 'Bar new amp improved')])
+    tui.c_search('new & improved')
+    lines = [line for line in output(tui).splitlines() if line.startswith('wowi:')]
+    assert lines == ['wowi:7 Bar new & improved WoWInterface 2024-03-05']
+
+
+def test_release_check_failure_adds_one_note(tui, router, free):
+    free('bar', repos=[gh_repo('owner/A'), gh_repo('owner/B')])
+    router.add(releases_url('owner/A'), {'message': 'limit'}, status=403)
+    router.add(releases_url('owner/B'), {'message': 'limit'}, status=403)
+    tui.c_search('bar')
+    text = output(tui)
+    assert text.count('GitHub release checks failed') == 1
+    assert ('GitHub release checks failed (HTTP 403); some results have no marker. '
+            'Setting gh_api raises the rate limit.') in text
+
+
+def test_hint_is_omitted_when_a_token_is_set(tui, router, free):
+    free('bar', repos=[gh_repo('owner/A')])
+    router.add(releases_url('owner/A'), {'message': 'limit'}, status=403)
+    tui.core.config['GHAPIKey'] = 'secret'
+    tui.c_search('bar')
+    text = output(tui)
+    assert 'GitHub release checks failed (HTTP 403); some results have no marker.' in text
+    assert 'gh_api' not in text
+
+
+def test_hint_is_omitted_for_other_statuses(tui, router, free):
+    free('bar', wowi=[wowi_entry(7, 'Bar Frames')], repos=[gh_repo('owner/A')])
+    router.add(releases_url('owner/A'), {'message': 'boom'}, status=500)
+    router.add(search_url('bar'), {'message': 'boom'}, status=502)
+    tui.c_search('bar')
+    text = output(tui)
+    assert 'GitHub search failed (HTTP 502).' in text
+    assert 'gh_api' not in text
+
+
+def test_search_failure_hint_is_omitted_when_a_token_is_set(tui, router, free):
+    free('bar', wowi=[wowi_entry(7, 'Bar Frames')])
+    router.add(search_url('bar'), {'message': 'limit'}, status=403)
+    tui.core.config['GHAPIKey'] = 'secret'
+    tui.c_search('bar')
+    text = output(tui)
+    assert 'GitHub search failed (HTTP 403).' in text
+    assert 'gh_api' not in text
+
+
+def test_marker_uses_the_release_the_installer_would_pick(tui, free):
+    asset = {'digest': 'sha256:abc'}
+    releases = [release_with(asset, prerelease=True), release_with(asset, draft=True), release_with(),
+                release_with({'digest': None}), release_with(asset)]
+    free('bar', repos=[gh_repo('owner/Bar')], releases={'owner/Bar': releases})
+    tui.c_search('bar')
+    assert 'gh:owner/Bar Bar GitHub 2025-01-02 [unverified]\n' in output(tui)
+
+
+def test_prerelease_first_list_marks_from_the_stable_release(tui, free):
+    releases = [release_with({'digest': None}, prerelease=True), release_with({'digest': 'sha256:abc'})]
+    free('bar', repos=[gh_repo('owner/Bar')], releases={'owner/Bar': releases})
+    tui.c_search('bar')
+    assert 'gh:owner/Bar Bar GitHub 2025-01-02 [verified]\n' in output(tui)
+
+
+def test_only_assetless_releases_mean_no_release(tui, free):
+    free('bar', repos=[gh_repo('owner/Bar')], releases={'owner/Bar': [release_with(), release_with()]})
+    tui.c_search('bar')
+    assert 'gh:owner/Bar Bar GitHub 2025-01-02 [no release]\n' in output(tui)
+
+
+def test_invalid_file_list_is_reported_and_not_cached(tui, router, free):
+    router.add(FILELIST, {'ERROR': 'x'})
+    router.add(search_url('bar'), {'items': [gh_repo('owner/Bar')]})
+    router.add(releases_url('owner/Bar'), [])
+    tui.c_search('bar')
+    assert 'WoWInterface search failed (invalid response).' in output(tui)
+    assert tui.core.freeSearch.fileList is None
+    router.add(FILELIST, [wowi_entry(7, 'Bar Frames')])
+    tui.c_search('bar')
+    assert 'wowi:7 Bar Frames' in output(tui)
+
+
+def test_invalid_file_list_alone_raises(tui, router):
+    router.add(FILELIST, {'ERROR': 'x'})
+    router.add(search_url('bar'), {'message': 'down'}, status=500)
+    with pytest.raises(RuntimeError, match=r'WoWInterface search failed \(invalid response\)\.'):
+        tui.c_search('bar')
+
+
+def test_file_list_entries_with_the_wrong_shape_are_skipped(tui, free):
+    broken = [None, 'x', [], {'UID': '1'}, {**wowi_entry(2, 'Bar'), 'UIDate': 'yesterday'},
+              {**wowi_entry(3, 'Bar'), 'UIDownloadTotal': 12}, {**wowi_entry(4, 'Bar'), 'UIDownloadTotal': 'many'},
+              {**wowi_entry(5, 'Bar'), 'UIName': None}, {**wowi_entry(6, 'Bar'), 'UIDate': 10 ** 30},
+              {**wowi_entry(8, 'Bar'), 'UID': 'x[/]'}]
+    free('bar', wowi=[*broken, wowi_entry(7, 'Bar Frames')])
+    tui.c_search('bar')
+    lines = [line for line in output(tui).splitlines() if line.startswith('wowi:')]
+    assert [line.split()[0] for line in lines] == ['wowi:7']
+
+
+@pytest.mark.parametrize('payload', [[], {'message': 'x'}, {'items': {}}, {'items': 'x'}])
+def test_search_payload_without_items_is_reported(tui, router, free, payload):
+    router.add(FILELIST, [wowi_entry(7, 'Bar Frames')])
+    router.add(search_url('bar'), payload)
+    tui.c_search('bar')
+    text = output(tui)
+    assert 'wowi:7 Bar Frames' in text
+    assert 'GitHub search failed (invalid response).' in text
+
+
+def test_search_items_with_the_wrong_shape_are_skipped(tui, free):
+    items = [None, 'x', {'name': 'NoFullName', 'description': 'addon'}, {'full_name': 5, 'description': 'addon'},
+             {'full_name': 'owner/Bad', 'description': 5, 'topics': 'warcraft'}, gh_repo('owner/Good')]
+    free('bar', repos=items, releases={'owner/Good': []})
+    tui.c_search('bar')
+    lines = [line for line in output(tui).splitlines() if line.startswith('gh:')]
+    assert [line.split()[0] for line in lines] == ['gh:owner/Good']
+
+
+def test_releases_payload_that_is_not_a_list_is_a_failed_check(tui, router, free):
+    free('bar', repos=[gh_repo('owner/Bar')])
+    router.add(releases_url('owner/Bar'), {'message': 'x'})
+    tui.c_search('bar')
+    text = output(tui)
+    assert 'gh:owner/Bar Bar GitHub 2025-01-02\n' in text
+    assert 'GitHub release checks failed (invalid response); some results have no marker.' in text
+
+
+def test_free_search_only_issues_the_three_expected_get_requests(tui, router, free):
+    free('bar', wowi=[wowi_entry(7, 'Bar Frames')], repos=[gh_repo('owner/Bar'), gh_repo('owner/Baz')],
+         releases={'owner/Bar': [], 'owner/Baz': []})
+    tui.c_search('bar')
+    shapes = [re.compile(re.escape(FILELIST) + '$'),
+              re.compile(re.escape(GITHUB_SEARCH) + r'\?'),
+              re.compile(r'https://api\.github\.com/repos/[^/?]+/[^/?]+/releases\?per_page=10$')]
+    assert len(router.requests) == 4
+    for request in router.requests:
+        assert request.method == 'GET'
+        assert any(shape.match(str(request.url)) for shape in shapes)
+
+
+def test_query_is_url_encoded_in_the_search_request(tui, router):
+    router.add(FILELIST, [])
+    tui.c_search('a&b #c "d"')
+    urls = [str(request.url) for request in router.requests]
+    assert ('https://api.github.com/search/repositories'
+            '?q=a%26b+%23c+%22d%22+in%3Aname%2Cdescription&per_page=30') in urls
+
+
+@pytest.mark.parametrize(('url', 'key'), [
+    ('https://www.wowinterface.com/downloads/info5086-BigWigs.html', 'wowi:5086'),
+    ('https://www.wowinterface.com/downloads/info5086.html', 'wowi:5086'),
+    ('https://github.com/BigWigsMods/BigWigs', 'gh:bigwigsmods/bigwigs'),
+    ('https://example.invalid/Addon', 'https://example.invalid/Addon'),
+])
+def test_identity_key(url, key):
+    assert identity_key(url) == key

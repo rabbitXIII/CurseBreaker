@@ -38,6 +38,7 @@ from prompt_toolkit import PromptSession, HTML
 from prompt_toolkit.completion import WordCompleter, NestedCompleter
 from packaging.version import Version
 from CB import is_addon_directory, __version__
+from CB.Search import identity_key, installed_keys
 from CB.Core import Core
 from CB.Verify import summarize
 from CB.Wago import WagoUpdater
@@ -1021,17 +1022,18 @@ class TUI:
 
     def print_free_search(self, query):
         outcome = self.core.free_search(query)
+        installed = installed_keys(self.core.config['Addons'])
         self.console.print('[green]Top results of your search:[/green]')
         for result in outcome.results:
-            self.console.print(self.free_search_line(result), highlight=False, emoji=False)
+            self.console.print(self.free_search_line(result, installed), highlight=False, emoji=False)
         for note in outcome.notes:
             self.console.print(f'[yellow]{escape(note)}[/yellow]', highlight=False, emoji=False)
 
-    def free_search_line(self, result):
-        line = f'{escape(result.slug)} {escape(result.name)} {result.source} {result.updated}'
+    def free_search_line(self, result, installed):
+        line = f'{escape(result.slug)} {escape(result.name)} {escape(result.source)} {escape(result.updated)}'
         if result.marker:
             line += f' {escape(f"[{result.marker}]")}'
-        if self.core.check_if_installed(result.url):
+        if identity_key(result.url) in installed:
             line += ' [yellow][Installed][/yellow]'
         return line
 
@@ -1082,9 +1084,10 @@ class TUI:
                            'everse the table compacting option.\n\t\t[bold white]-s[/bold white] - Temporary reverse th'
                            'e source display option.\n'
                            '[green]orphans[/green]\n\tPrints list of orphaned directories and files.\n'
-                           '[green]search [Keyword][/green]\n\tExecutes addon search on Wago Addons.\n\tWithout a Wago '
-                           'Addons API key it searches WoWInterface and GitHub instead.\n\tGitHub results marked \\[v'
-                           'erified] publish SHA-256 digests.\n'
+                           '[green]search [Keyword][/green]\n\tExecutes addon search on Wago Addons.\n'
+                           '\tWithout a Wago Addons API key it searches WoWInterface and GitHub instead.\n\tGitHub r'
+                           'esults marked \\[verified] publish SHA-256 digests.\n\tThat search uses GitHub API reque'
+                           'sts (one search plus one per GitHub result) from the same hourly quota as updates.\n'
                            '[green]backup[/green]\n\tCommand creates a backup of WTF directory.\n'
                            '[green]import[/green]\n\tCommand attempts to import already installed addons.\n'
                            '[green]export[/green]\n\tCommand prints list of all installed addons in a form suitable f'
