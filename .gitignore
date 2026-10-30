@@ -10,4 +10,4 @@ WTF-Backup
 /.env
 *.zip
 *.exe
-*.gz
+*.gz.scratch/
