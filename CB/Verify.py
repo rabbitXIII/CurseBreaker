@@ -113,20 +113,20 @@ def open_archive(content, name=None):
     return archive
 
 
-def safe_extract(archive, path, directories, name=None):
+def safe_extract(archive, path, directories, addon=None):
     root = Path(path).resolve()
     allowed = {directory for directory in directories if is_addon_directory(directory)}
     for member in archive.infolist():
         if not member.filename:
             continue
-        check_member_name(member.filename, name)
+        check_member_name(member.filename, addon)
         top, separator, _ = member.filename.partition('/')
         if not separator or top not in allowed:
             continue
         base = (root / top).resolve()
         target = (root / member.filename).resolve()
         if target != base and base not in target.parents:
-            raise Refusal(f'Archive member escapes its addon directory: {member.filename}', name)
+            raise Refusal(f'Archive member escapes its addon directory: {member.filename}', addon)
         archive.extract(member, root)
 
 

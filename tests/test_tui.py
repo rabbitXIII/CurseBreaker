@@ -269,3 +269,12 @@ def test_lock_mismatch_prints_one_message(tui, wowi):
     assert 'Refused: Addon100: The publisher replaced the file for version 1.0.' in text
     assert 'Failed to parse addon data' not in text
     assert 'Traceback' not in text
+
+
+def test_corrupt_download_prints_parse_error_not_refusal(tui, wowi):
+    wowi(100, '1.0', {}, content=b'<html>')
+    tui.c_install('wowi:100')
+    text = output(tui)
+    assert 'Failed to parse addon data: Addon100.\nDownloaded file is not a valid ZIP archive.' in text
+    assert 'Refused:' not in text
+    assert 'Traceback' not in text

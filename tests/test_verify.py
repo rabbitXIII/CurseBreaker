@@ -67,6 +67,15 @@ def test_insecure_env_downgrades_mismatch_to_warning(router, http, monkeypatch):
     assert 'failed md5 verification' in result.warning and Verify.INSECURE_ENV in result.warning
 
 
+def test_insecure_env_warning_text_is_exact(router, http, monkeypatch):
+    monkeypatch.setenv(Verify.INSECURE_ENV, '1')
+    router.add(URL, b'data')
+    result = Verify.download(http, URL, ('md5', '0' * 32), name='Foo')
+    assert result.warning == (f'WARNING: Foo.\nDownloaded file failed md5 verification.\nURL: {URL}\n'
+                              f'Expected: {"0" * 32}\nActual: {md5(b"data")}\n'
+                              f'Installed anyway because CURSEBREAKER_INSECURE_SKIP_VERIFY=1.')
+
+
 def test_parse_digest():
     assert Verify.parse_digest('sha256:abc') == ('sha256', 'abc')
     assert Verify.parse_digest(None) is None

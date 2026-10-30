@@ -1,4 +1,5 @@
 import json
+import httpx
 import pytest
 from CB import Verify, retry
 from conftest import make_zip, sha256, gh_release, tree
@@ -191,13 +192,15 @@ def test_tofu_same_version_same_hash_allowed(core, wowi, addons):
 
 
 def test_tofu_insecure_env_allows_with_notice(core, wowi, addons, monkeypatch):
-    wowi(100, '1.0', {'Foo/Foo.toc': 'x'})
+    locked = wowi(100, '1.0', {'Foo/Foo.toc': 'x'})
     core.add_addon('wowi:100', False)
-    wowi(100, '1.0', {'Foo/Foo.toc': 'replaced'})
+    replaced = wowi(100, '1.0', {'Foo/Foo.toc': 'replaced'})
     monkeypatch.setenv(Verify.INSECURE_ENV, '1')
     core.update_addon(WOWI, True, True)
     assert (addons / 'Foo' / 'Foo.toc').read_text() == 'replaced'
-    assert any('publisher replaced the file' in notice for notice in core.notices)
+    assert core.notices[-1] == ('WARNING: Addon100.\nThe publisher replaced the file for version 1.0.\n'
+                                f'Locked SHA256: {sha256(locked)}\nDownloaded SHA256: {sha256(replaced)}\n'
+                                'Installed anyway because CURSEBREAKER_INSECURE_SKIP_VERIFY=1.')
 
 
 def test_insecure_env_allows_hash_mismatch_with_notice(core, wowi, addons, monkeypatch):
@@ -309,10 +312,19 @@ def test_ownership_refusal_message_lists_conflicts_for_addon(core, wowi, addons)
                                 'Install with -a to adopt it.')
 
 
-def test_network_error_still_retries_with_parse_prefix(core, wowi, router):
+def test_http_error_still_retries_with_parse_prefix(core, wowi, router):
     wowi(100, '1.0', {'Foo/Foo.toc': 'x'})
     router.add('https://cdn.wowinterface.com/downloads/file100/1.0.zip', b'down', status=500)
     with pytest.raises(RuntimeError, match=r'^Failed to parse addon data: ') as error:
+        core.add_addon('wowi:100', False)
+    assert not isinstance(error.value, Verify.Refusal)
+    assert len(download_requests(router, '/1.0.zip')) == 2
+
+
+def test_transport_error_still_retries_with_parse_prefix(core, wowi, router):
+    wowi(100, '1.0', {'Foo/Foo.toc': 'x'})
+    router.fail('https://cdn.wowinterface.com/downloads/file100/1.0.zip', httpx.ConnectError('unreachable'))
+    with pytest.raises(RuntimeError, match=r'^Failed to parse addon data: unreachable$') as error:
         core.add_addon('wowi:100', False)
     assert not isinstance(error.value, Verify.Refusal)
     assert len(download_requests(router, '/1.0.zip')) == 2

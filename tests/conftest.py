@@ -32,6 +32,7 @@ def sha256(content):
 class Router:
     def __init__(self):
         self.routes = {}
+        self.failures = {}
         self.requests = []
 
     def add(self, url, content, status=200, headers=None):
@@ -39,9 +40,14 @@ class Router:
             content = json.dumps(content).encode()
         self.routes[url] = (status, content, headers or {})
 
+    def fail(self, url, error):
+        self.failures[url] = error
+
     def __call__(self, request):
         self.requests.append(request)
         url = str(request.url)
+        if url in self.failures:
+            raise self.failures[url]
         if url not in self.routes:
             return httpx.Response(404, content=b'not found')
         status, content, headers = self.routes[url]
