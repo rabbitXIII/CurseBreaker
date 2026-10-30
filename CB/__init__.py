@@ -25,6 +25,11 @@ def parse_directories(names, known=()):
     return sorted(directories)
 
 
+class Refusal(RuntimeError):
+    def __init__(self, reason, addon=None):
+        super().__init__(f'{addon}: {reason}' if addon else reason)
+
+
 def retry(custom_error=False):
     def wraps(func):
         def inner(*args, **kwargs):
@@ -33,6 +38,8 @@ def retry(custom_error=False):
                 try:
                     result = func(*args, **kwargs)
                 except KeyboardInterrupt:
+                    raise
+                except Refusal:
                     raise
                 except Exception as e:
                     description = str(e).replace('Failed to parse addon data: ', '')
