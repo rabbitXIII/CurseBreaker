@@ -85,7 +85,7 @@ class Core:
         if not os.path.isdir('WTF-Backup') and self.config['Backup']['Enabled']:
             os.mkdir('WTF-Backup')
         self.update_config()
-        self.lock_history()
+        self.seed_lock_history()
 
     def save_config(self):
         with open(self.configPath, 'w') as outfile:
@@ -239,9 +239,10 @@ class Core:
         self.notices = []
         self.verification = []
 
+    def seed_lock_history(self):
+        self.config.setdefault('LockHistory', Verify.seed_lock_history(self.config['Addons']))
+
     def lock_history(self):
-        if 'LockHistory' not in self.config:
-            self.config['LockHistory'] = Verify.seed_lock_history(self.config['Addons'])
         return self.config['LockHistory']
 
     def verify_install(self, new, url, current=None, adopt=False):
