@@ -19,7 +19,7 @@ cd CurseBreaker
 ./cb.sh              # interactive; also ./cb.sh status, ./cb.sh update, ./cb.sh headless
 ```
 
-`cb.sh` runs inside `/Applications/World of Warcraft/_forever_`. For another client, set `CURSEBREAKER_WOW_DIR` (e.g. `.../_retail_`). It uses `uv` if it is installed. Otherwise it creates `.venv` with Python 3.14+.
+`cb.sh` runs inside `/Applications/World of Warcraft/_forever_`. For another client, set `CURSEBREAKER_WOW_DIR` (e.g. `.../_retail_`). It uses `uv` if it is installed. Otherwise it creates `.venv` with Python 3.14+ and installs the hash-pinned `requirements.lock`.
 
 ### Tracking upstream
 

@@ -19,7 +19,7 @@ is_supported() {
 }
 
 VENV=$REPO/.venv
-STAMP=$VENV/.cb-pyproject
+STAMP=$VENV/.cb-requirements.lock
 if ! is_supported "$VENV/bin/python"; then
     PYTHON=
     for candidate in python3.14 python3; do
@@ -34,13 +34,10 @@ if ! is_supported "$VENV/bin/python"; then
     fi
     "$PYTHON" -m venv --clear "$VENV"
 fi
-if ! cmp -s "$REPO/pyproject.toml" "$STAMP"; then
+if ! cmp -s "$REPO/requirements.lock" "$STAMP"; then
     "$VENV/bin/python" -m pip --version >/dev/null 2>&1 || "$VENV/bin/python" -m ensurepip -q
-    "$VENV/bin/python" -I -c 'import sys, tomllib
-print("\n".join(tomllib.load(open(sys.argv[1], "rb"))["project"]["dependencies"]))' \
-        "$REPO/pyproject.toml" > "$VENV/cb-requirements.txt"
-    "$VENV/bin/python" -m pip install -q --disable-pip-version-check -r "$VENV/cb-requirements.txt"
-    cp "$REPO/pyproject.toml" "$STAMP"
+    "$VENV/bin/python" -m pip install -q --disable-pip-version-check --require-hashes -r "$REPO/requirements.lock"
+    cp "$REPO/requirements.lock" "$STAMP"
 fi
 cd "$WOW_DIR"
 exec "$VENV/bin/python" "$REPO/CurseBreaker.py" "$@"

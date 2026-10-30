@@ -17,6 +17,10 @@ jobs:
       run: uv python install 3.14
     - name: Install dependencies
       run: uv sync --dev --frozen
+    - name: Check requirements.lock matches uv.lock
+      run: |
+        uv export --format requirements-txt --no-dev --no-emit-project --frozen -q -o requirements.lock
+        git diff --exit-code requirements.lock
     - name: Lint
       run: uv run ruff check
     - name: Test
