@@ -48,6 +48,7 @@ if platform.system() == 'Windows':
     from ctypes import windll, wintypes
 
 EXPECTED_ERROR_TYPES = (RuntimeError, NotImplementedError, Refusal)
+UPSTREAM_BINARY_UPDATES = False
 
 
 def describe_error(e):
@@ -265,8 +266,8 @@ class TUI:
         sys.exit(0)
 
     def auto_update(self):
-        # Upstream binaries would replace this fork with an unverified build; the fork runs from source.
-        return
+        if not UPSTREAM_BINARY_UPDATES:
+            return
         if not getattr(sys, 'frozen', False) or 'CURSEBREAKER_VARDEXMODE' in os.environ:
             return
         try:
