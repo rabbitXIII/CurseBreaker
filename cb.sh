@@ -1,5 +1,4 @@
 #!/bin/sh
-# Runs CurseBreaker from source inside a WoW client directory: ./cb.sh [command] [args...]
 set -eu
 
 REPO=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
