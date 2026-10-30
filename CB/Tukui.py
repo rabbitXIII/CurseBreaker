@@ -32,4 +32,4 @@ class TukuiAddon:
             raise RuntimeError(f'{self.name}.\nProject package is corrupted or incorrectly packaged.')
 
     def install(self, path):
-        Verify.safe_extract(self.archive, path, self.directories)
+        Verify.safe_extract(self.archive, path, self.directories, self.name)
