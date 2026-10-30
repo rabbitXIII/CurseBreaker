@@ -555,7 +555,7 @@ class TUI:
 
     def confirm_branch_install(self, addon, optunverified, exceptions):
         source = self.find_branch_source(addon)
-        if not source or self.core.check_if_installed(addon):
+        if not source or self.core.check_if_installed(addon.removesuffix('/')):
             return True
         interactive = sys.stdin.isatty()
         if optunverified or (interactive and self.ask_branch_install(source)):
