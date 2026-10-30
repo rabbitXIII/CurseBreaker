@@ -12,6 +12,8 @@ A fork of [AcidWeb/CurseBreaker](https://github.com/AcidWeb/CurseBreaker) that c
 
 Setting `CURSEBREAKER_INSECURE_SKIP_VERIFY=1` turns hash and lock mismatches into warnings. Use it only to recover from a known-good republish.
 
+Expected errors print as a single message. Set `CURSEBREAKER_DEBUG=1` to see full tracebacks.
+
 ### Quickstart
 
 ```sh
