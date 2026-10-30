@@ -574,9 +574,9 @@ class TUI:
                                'ument.[bold white]\n\tFlags:[/bold white]\n\t\t[bold white]-i[/bold white] - Disable th'
                                'e client version check.\n\t\t[bold white]-a[/bold white] - Adopt existing directories n'
                                'ot managed by CurseBreaker.\n\t\t[bold white]-u[/bold white] - Allow unverifiable b'
-                               'ranch installs (custom repository branches) without asking.\n[bold green]Supported UR'
-                               'L:[/bold green]\n\thttps://addons.wago.io/addons/\\[addon_name] [bold white]|[/bold wh'
-                               'ite] wa:\\[addon_name]\n\thttps://www.w'
+                               'ranch installs (custom repository branches) without asking.\n'
+                               '[bold green]Supported URL:[/bold green]\n\thttps://addons.wago'
+                               '.io/addons/\\[addon_name] [bold white]|[/bold white] wa:\\[addon_name]\n\thttps://www.w'
                                'owinterface.com/downloads/\\[addon_name] [bold white]|[/bold white] wowi:\\[addon_id]\n'
                                '\thttps://github.com/\\[username]/\\[repository_name] [bold white]|[/bold white] gh:\\['
                                'username]/\\[repository_name]\n\tElvUI [bold white]|[/bold white] Tukui\n\t' +
