@@ -29,6 +29,10 @@ def insecure():
     return os.environ.get(INSECURE_ENV) == '1'
 
 
+def branch_source(custom_repository, url):
+    return custom_repository.get(url.lower())
+
+
 def parse_digest(digest):
     if digest and digest.lower().startswith('sha256:'):
         return 'sha256', digest[7:]
