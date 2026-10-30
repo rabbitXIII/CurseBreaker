@@ -85,6 +85,7 @@ class Core:
         if not os.path.isdir('WTF-Backup') and self.config['Backup']['Enabled']:
             os.mkdir('WTF-Backup')
         self.update_config()
+        self.seed_lock_history()
 
     def save_config(self):
         with open(self.configPath, 'w') as outfile:
@@ -238,24 +239,38 @@ class Core:
         self.notices = []
         self.verification = []
 
-    def verify_install(self, new, current=None, adopt=False):
+    def seed_lock_history(self):
+        self.config.setdefault('LockHistory', Verify.seed_lock_history(self.config['Addons']))
+
+    def lock_history(self):
+        return self.config['LockHistory']
+
+    def verify_install(self, new, url, current=None, adopt=False):
         if new.verifyWarning:
             self.notices.append(new.verifyWarning)
+        self.check_ownership(new, current, adopt)
+        self.check_lock(new, url)
+
+    def check_ownership(self, new, current, adopt):
         owners = {directory: addon['Name'] for addon in self.config['Addons'] if addon is not current
                   for directory in addon['Directories']}
         conflicts = Verify.ownership_conflicts(new.directories, self.protected_directories(), owners,
                                                current['Directories'] if current else [], os.listdir(self.path), adopt)
         if conflicts:
             raise Verify.Refusal('\n'.join(conflicts), new.name)
-        lock = current.get('Lock') if current else None
-        if not isinstance(new, GitHubAddonRaw) and Verify.lock_mismatch(lock, new.currentVersion, new.sha256):
+
+    def check_lock(self, new, url):
+        if isinstance(new, GitHubAddonRaw):
+            return
+        locked = Verify.locked_sha256(self.lock_history(), url, new.currentVersion)
+        if locked and locked != new.sha256:
             reason = (f'The publisher replaced the file for version {new.currentVersion}.\n'
-                      f'Locked SHA256: {lock["SHA256"]}\nDownloaded SHA256: {new.sha256}')
+                      f'Locked SHA256: {locked}\nDownloaded SHA256: {new.sha256}')
             if not Verify.insecure():
                 raise Verify.Refusal(reason, new.name)
             self.notices.append(f'WARNING: {new.name}.\n{reason}\nInstalled anyway because {Verify.INSECURE_ENV}=1.')
 
-    def record_install(self, new, entry):
+    def record_install(self, new, url, entry):
         if 'Directories' in entry and set(new.directories) != set(entry['Directories']):
             added = sorted(set(new.directories) - set(entry['Directories']))
             removed = sorted(set(entry['Directories']) - set(new.directories))
@@ -265,6 +280,7 @@ class Core:
                          'SHA256': new.sha256,
                          'Verified': new.verified,
                          'Directories': new.directories}
+        Verify.remember_lock(self.lock_history(), url, new.currentVersion, new.sha256)
         self.verification.append((new.name, new.verified, isinstance(new, (WoWInterfaceAddon, GitHubAddon))))
 
     def parse_url(self, url):
@@ -331,7 +347,7 @@ class Core:
         new.get_addon()
         if addon := self.check_if_installed_dirs(new.directories):
             return False, addon['Name'], addon['Version']
-        self.verify_install(new, adopt=adopt)
+        self.verify_install(new, url, adopt=adopt)
         self.cleanup(new.directories)
         new.install(self.path)
         checksums, signatures = self.directory_checksums(new.directories)
@@ -341,7 +357,7 @@ class Core:
                  'Directories': new.directories,
                  'Checksums': checksums,
                  'Signatures': signatures}
-        self.record_install(new, entry)
+        self.record_install(new, url, entry)
         self.config['Addons'].append(entry)
         self.save_config()
         return True, new.name, new.currentVersion
@@ -396,11 +412,11 @@ class Core:
         if not new.ignoreUpdate and (force or (new.currentVersion != old['Version'] and update
                                                and not modified and not blocked)):
             new.get_addon()
-            self.verify_install(new, old)
+            self.verify_install(new, old['URL'], old)
             self.cleanup(old['Directories'])
             new.install(self.path)
             checksums, signatures = self.directory_checksums(new.directories)
-            self.record_install(new, old)
+            self.record_install(new, old['URL'], old)
             old['Name'] = new.name
             old['Version'] = new.currentVersion
             old['Directories'] = new.directories
