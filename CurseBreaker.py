@@ -251,6 +251,8 @@ class TUI:
     def auto_update(self):
         if not getattr(sys, 'frozen', False) or 'CURSEBREAKER_VARDEXMODE' in os.environ:
             return
+        # Upstream binaries would replace this fork with an unverified build; the fork runs from source.
+        return
         try:
             if os.path.isfile(f'{sys.executable}.old'):
                 with suppress(PermissionError):
