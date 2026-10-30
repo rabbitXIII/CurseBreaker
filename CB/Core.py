@@ -16,7 +16,7 @@ from collections import Counter
 from checksumdir import dirhash
 from urllib.parse import quote_plus
 from rich.progress import Progress, BarColumn
-from . import is_addon_directory, retry, APIAuth, __version__
+from . import is_addon_directory, retry, APIAuth, Verify, __version__
 from .Tukui import TukuiAddon
 from .GitHub import GitHubAddon, GitHubAddonRaw
 from .WagoAddons import WagoAddonsAddon
@@ -40,6 +40,8 @@ class Core:
         self.wagoIdCache = None
         self.tukuiCache = None
         self.configDirty = False
+        self.notices = []
+        self.verification = []
 
     def init_master_config(self):
         try:
@@ -77,7 +79,8 @@ class Core:
                            'AutoUpdate': True,
                            'ShowAuthors': True,
                            'ShowSources': False,
-                           'AutoUpdateDelay': True}
+                           'AutoUpdateDelay': True,
+                           'ProtectedDirectories': []}
             self.save_config()
         if not os.path.isdir('WTF-Backup') and self.config['Backup']['Enabled']:
             os.mkdir('WTF-Backup')
@@ -141,7 +144,8 @@ class Core:
                     ['4.0.0', 'WAAAPIKey', ''],
                     ['4.0.0', 'CBCompanionVersion', 0],
                     ['4.2.0', 'ShowSources', False],
-                    ['4.7.0', 'AutoUpdateDelay', True]]:
+                    ['4.7.0', 'AutoUpdateDelay', True],
+                    ['4.9.1', 'ProtectedDirectories', []]]:
             if add[1] not in self.config.keys():
                 self.config[add[1]] = add[2]
         for delete in [['1.3.0', 'URLCache'],
@@ -205,9 +209,63 @@ class Core:
         return count > 4
 
     def cleanup(self, directories):
+        protected = self.protected_directories()
         for directory in directories:
-            if is_addon_directory(directory):
+            if is_addon_directory(directory) and not Verify.is_protected(directory, protected):
                 shutil.rmtree(self.path / directory, ignore_errors=True)
+
+    def protected_directories(self):
+        return self.config.setdefault('ProtectedDirectories', [])
+
+    def protect_directories(self, directories):
+        protected = self.protected_directories()
+        added = []
+        for directory in directories:
+            if not Verify.is_protected(directory, protected):
+                protected.append(directory)
+                added.append(directory)
+        self.save_config()
+        return added
+
+    def unprotect_directories(self, directories):
+        protected = self.protected_directories()
+        removed = [d for d in protected if Verify.is_protected(d, directories)]
+        protected[:] = [d for d in protected if d not in removed]
+        self.save_config()
+        return removed
+
+    def reset_notices(self):
+        self.notices = []
+        self.verification = []
+
+    def verify_install(self, new, current=None, adopt=False):
+        if new.verifyWarning:
+            self.notices.append(new.verifyWarning)
+        owners = {directory: addon['Name'] for addon in self.config['Addons'] if addon is not current
+                  for directory in addon['Directories']}
+        conflicts = Verify.ownership_conflicts(new.directories, self.protected_directories(), owners,
+                                               current['Directories'] if current else [], os.listdir(self.path), adopt)
+        if conflicts:
+            raise RuntimeError(f'{new.name}.\nRefusing to install:\n' + '\n'.join(conflicts))
+        lock = current.get('Lock') if current else None
+        if not isinstance(new, GitHubAddonRaw) and Verify.lock_mismatch(lock, new.currentVersion, new.sha256):
+            message = (f'{new.name}.\nThe publisher replaced the file for version {new.currentVersion}.\n'
+                       f'Locked SHA256: {lock["SHA256"]}\nDownloaded SHA256: {new.sha256}')
+            if not Verify.insecure():
+                raise RuntimeError(message)
+            self.notices.append(f'WARNING: {message}\nInstalled anyway because {Verify.INSECURE_ENV}=1.')
+
+    def record_install(self, new, entry):
+        if 'Directories' in entry and set(new.directories) != set(entry['Directories']):
+            added = sorted(set(new.directories) - set(entry['Directories']))
+            removed = sorted(set(entry['Directories']) - set(new.directories))
+            self.notices.append(f'{new.name}: directory set changed. Added: {", ".join(added) or "-"}. '
+                                f'Removed: {", ".join(removed) or "-"}.')
+        entry['Lock'] = {'Version': new.currentVersion,
+                         'SHA256': new.sha256,
+                         'Verified': new.verified,
+                         'Directories': new.directories}
+        self.verification.append((new.name, new.verified, isinstance(new, (WoWInterfaceAddon, GitHubAddon))))
 
     def parse_url(self, url):
         if url.startswith('https://addons.wago.io/addons/'):
@@ -259,7 +317,7 @@ class Core:
         else:
             return '?', None
 
-    def parse_new_addon(self, ignore, url):
+    def parse_new_addon(self, ignore, url, adopt=False):
         if ignore:
             self.config['IgnoreClientVersion'][url] = True
         new = self.parse_url(url)
@@ -268,19 +326,22 @@ class Core:
         new.get_addon()
         if addon := self.check_if_installed_dirs(new.directories):
             return False, addon['Name'], addon['Version']
+        self.verify_install(new, adopt=adopt)
         self.cleanup(new.directories)
         new.install(self.path)
         checksums, signatures = self.directory_checksums(new.directories)
-        self.config['Addons'].append({'Name': new.name,
-                                      'URL': url,
-                                      'Version': new.currentVersion,
-                                      'Directories': new.directories,
-                                      'Checksums': checksums,
-                                      'Signatures': signatures})
+        entry = {'Name': new.name,
+                 'URL': url,
+                 'Version': new.currentVersion,
+                 'Directories': new.directories,
+                 'Checksums': checksums,
+                 'Signatures': signatures}
+        self.record_install(new, entry)
+        self.config['Addons'].append(entry)
         self.save_config()
         return True, new.name, new.currentVersion
 
-    def add_addon(self, url, ignore):
+    def add_addon(self, url, ignore, adopt=False):
         if url.endswith(':'):
             raise NotImplementedError('Provided URL is not supported.')
         elif 'wago-app://' in url:
@@ -296,7 +357,7 @@ class Core:
         if addon := self.check_if_installed(url):
             return False, addon['Name'], addon['Version']
         else:
-            return self.parse_new_addon(ignore, url)
+            return self.parse_new_addon(ignore, url, adopt)
 
     def del_addon(self, url, keep):
         if old := self.check_if_installed(url):
@@ -323,12 +384,18 @@ class Core:
                        None, dev, False
         source, sourceurl = self.parse_url_source(old['URL'])
         new = self.parse_url(old['URL'])
+        if not force and new.currentVersion != old['Version'] and Verify.is_downgrade(oldversion, new.currentVersion):
+            self.notices.append(f'{new.name}: not updating from {oldversion} to older version {new.currentVersion}. '
+                                f'Use force_update to install it anyway.')
+            blocked = True
         if not new.ignoreUpdate and (force or (new.currentVersion != old['Version'] and update
                                                and not modified and not blocked)):
             new.get_addon()
+            self.verify_install(new, old)
             self.cleanup(old['Directories'])
             new.install(self.path)
             checksums, signatures = self.directory_checksums(new.directories)
+            self.record_install(new, old)
             old['Name'] = new.name
             old['Version'] = new.currentVersion
             old['Directories'] = new.directories
