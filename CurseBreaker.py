@@ -39,7 +39,7 @@ from prompt_toolkit.completion import WordCompleter, NestedCompleter
 from packaging.version import Version
 from CB import is_addon_directory, __version__
 from CB.Core import Core
-from CB.Verify import summarize
+from CB.Verify import summarize, Refusal
 from CB.Wago import WagoUpdater
 from CB.Compat import clear, set_terminal_title, set_terminal_size, KBHit
 from CB.Resources import LOGO, HEADLESS_TERMINAL_THEME
@@ -47,10 +47,12 @@ from CB.Resources import LOGO, HEADLESS_TERMINAL_THEME
 if platform.system() == 'Windows':
     from ctypes import windll, wintypes
 
-EXPECTED_ERROR_TYPES = (RuntimeError, NotImplementedError)
+EXPECTED_ERROR_TYPES = (RuntimeError, NotImplementedError, Refusal)
 
 
 def describe_error(e):
+    if isinstance(e, Refusal):
+        return f'Refused: {e}'
     return str(e) or str(e.__cause__ or '') or e.__class__.__name__
 
 

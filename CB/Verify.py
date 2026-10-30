@@ -7,7 +7,7 @@ import zipfile
 from pathlib import Path
 from dataclasses import dataclass
 from packaging.version import Version, InvalidVersion
-from . import is_addon_directory
+from . import is_addon_directory, Refusal
 
 MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
 MAX_MEMBERS = 20000
@@ -50,12 +50,11 @@ def download(http, url, expected=None, name=None, **kwargs):
     with http.stream('GET', url, **kwargs) as response:
         response.raise_for_status()
         if int(response.headers.get('Content-Length') or 0) > MAX_ARCHIVE_BYTES:
-            raise RuntimeError(f'{label}.\nArchive exceeds the {MAX_ARCHIVE_BYTES // 1024 // 1024} MiB size limit.')
+            raise Refusal(f'Archive exceeds the {MAX_ARCHIVE_BYTES // 1024 // 1024} MiB size limit.', label)
         for chunk in response.iter_bytes():
             content.extend(chunk)
             if len(content) > MAX_ARCHIVE_BYTES:
-                raise RuntimeError(f'{label}.\nArchive exceeds the {MAX_ARCHIVE_BYTES // 1024 // 1024} MiB size '
-                                   f'limit.')
+                raise Refusal(f'Archive exceeds the {MAX_ARCHIVE_BYTES // 1024 // 1024} MiB size limit.', label)
             sha256.update(chunk)
             if md5:
                 md5.update(chunk)
@@ -67,11 +66,10 @@ def download(http, url, expected=None, name=None, **kwargs):
     if actual == digest.strip().lower():
         result.verified = algorithm
         return result
-    message = (f'{label}.\nDownloaded file failed {algorithm} verification.\nURL: {url}\nExpected: {digest}\n'
-               f'Actual: {actual}')
+    reason = f'Downloaded file failed {algorithm} verification.\nURL: {url}\nExpected: {digest}\nActual: {actual}'
     if not insecure():
-        raise RuntimeError(message)
-    result.warning = f'WARNING: {message}\nInstalled anyway because {INSECURE_ENV}=1.'
+        raise Refusal(reason, label)
+    result.warning = f'WARNING: {label}.\n{reason}\nInstalled anyway because {INSECURE_ENV}=1.'
     return result
 
 
@@ -83,12 +81,12 @@ def fetch(addon, url, **kwargs):
     return open_archive(result.content, addon.name)
 
 
-def check_member_name(name):
+def check_member_name(name, addon=None):
     normalized = name.replace('\\', '/')
     if normalized.startswith('/') or re.match(r'^[A-Za-z]:', normalized):
-        raise RuntimeError(f'Archive contains an absolute path: {name}')
+        raise Refusal(f'Archive contains an absolute path: {name}', addon)
     if '..' in normalized.split('/'):
-        raise RuntimeError(f'Archive contains a path traversal: {name}')
+        raise Refusal(f'Archive contains a path traversal: {name}', addon)
 
 
 def open_archive(content, name=None):
@@ -99,36 +97,36 @@ def open_archive(content, name=None):
         raise RuntimeError(f'{label}Downloaded file is not a valid ZIP archive.') from e
     members = archive.infolist()
     if len(members) > MAX_MEMBERS:
-        raise RuntimeError(f'{label}Archive has more than {MAX_MEMBERS} members.')
+        raise Refusal(f'Archive has more than {MAX_MEMBERS} members.', name)
     total = 0
     for member in members:
-        check_member_name(member.filename)
+        check_member_name(member.filename, name)
         if stat.S_ISLNK(member.external_attr >> 16):
-            raise RuntimeError(f'{label}Archive contains a symlink: {member.filename}')
+            raise Refusal(f'Archive contains a symlink: {member.filename}', name)
         if member.file_size > RATIO_MIN_BYTES and member.file_size > MAX_RATIO * max(member.compress_size, 1):
-            raise RuntimeError(f'{label}Archive member has a suspicious compression ratio: {member.filename}')
+            raise Refusal(f'Archive member has a suspicious compression ratio: {member.filename}', name)
         # INVARIANT: zipfile never yields more than a member's declared file_size, so this sum bounds extraction.
         total += member.file_size
         if total > MAX_UNCOMPRESSED_BYTES:
-            raise RuntimeError(f'{label}Archive exceeds the {MAX_UNCOMPRESSED_BYTES // 1024 ** 3} GiB uncompressed '
-                               f'size limit.')
+            raise Refusal(f'Archive exceeds the {MAX_UNCOMPRESSED_BYTES // 1024 ** 3} GiB uncompressed size limit.',
+                          name)
     return archive
 
 
-def safe_extract(archive, path, directories):
+def safe_extract(archive, path, directories, addon=None):
     root = Path(path).resolve()
     allowed = {directory for directory in directories if is_addon_directory(directory)}
     for member in archive.infolist():
         if not member.filename:
             continue
-        check_member_name(member.filename)
+        check_member_name(member.filename, addon)
         top, separator, _ = member.filename.partition('/')
         if not separator or top not in allowed:
             continue
         base = (root / top).resolve()
         target = (root / member.filename).resolve()
         if target != base and base not in target.parents:
-            raise RuntimeError(f'Archive member escapes its addon directory: {member.filename}')
+            raise Refusal(f'Archive member escapes its addon directory: {member.filename}', addon)
         archive.extract(member, root)
 
 

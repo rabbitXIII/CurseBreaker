@@ -1,7 +1,7 @@
 import sys
 import httpx
 import pytest
-from conftest import tree, output
+from conftest import make_zip, tree, output
 
 
 def test_install_adopt_flag_reaches_core(tui, wowi, addons):
@@ -83,7 +83,8 @@ def test_verify_refusal_prints_one_message(tui, wowi):
     wowi(100, '1.0', {'Foo/Foo.toc': 'x'})
     tui.c_install('wowi:100')
     text = output(tui)
-    assert 'Refusing to install' in text
+    assert 'Refused: Addon100: Foo is a protected directory.' in text
+    assert 'Failed to parse addon data' not in text
     assert 'Traceback' not in text
 
 
@@ -149,7 +150,8 @@ def test_verify_mismatch_prints_full_refusal(tui, wowi):
     wowi(100, '1.0', {'Foo/Foo.toc': 'x'}, uimd5='0' * 32)
     tui.c_install('wowi:100')
     text = output(tui)
-    assert 'failed md5 verification' in text
+    assert 'Refused: Addon100: Downloaded file failed md5 verification.' in text
+    assert 'Failed to parse addon data' not in text
     assert 'Expected:' in text
     assert 'Actual:' in text
     assert 'Traceback' not in text
@@ -219,3 +221,43 @@ def test_motd_bug_is_reraised(tui, monkeypatch):
     monkeypatch.setattr(tui, 'motd_parser', raising(KeyError('x')))
     with pytest.raises(KeyError):
         tui.show_motd()
+
+
+def test_archive_refusal_prints_one_message(tui, wowi):
+    wowi(100, '1.0', {'Foo/Foo.toc': 'x', '../evil.lua': 'x'})
+    tui.c_install('wowi:100')
+    text = output(tui)
+    assert 'Refused: Addon100: Archive contains a path traversal: ../evil.lua' in text
+    assert 'Failed to parse addon data' not in text
+    assert 'Traceback' not in text
+
+
+def test_symlink_refusal_prints_one_message(tui, wowi):
+    content = make_zip({'Foo/Foo.toc': 'x'}, symlinks=[('Foo/link', '/etc')])
+    wowi(100, '1.0', {}, content=content)
+    tui.c_install('wowi:100')
+    text = output(tui)
+    assert 'Refused: Addon100: Archive contains a symlink: Foo/link' in text
+    assert 'Failed to parse addon data' not in text
+    assert 'Traceback' not in text
+
+
+def test_lock_mismatch_prints_one_message(tui, wowi):
+    wowi(100, '1.0', {'Foo/Foo.toc': 'x'})
+    tui.core.add_addon('wowi:100', False)
+    wowi(100, '1.0', {'Foo/Foo.toc': 'replaced'})
+    tui.setup_table()
+    tui.c_update('Addon100', force=True)
+    text = output(tui)
+    assert 'Refused: Addon100: The publisher replaced the file for version 1.0.' in text
+    assert 'Failed to parse addon data' not in text
+    assert 'Traceback' not in text
+
+
+def test_corrupt_download_prints_parse_error_not_refusal(tui, wowi):
+    wowi(100, '1.0', {}, content=b'<html>')
+    tui.c_install('wowi:100')
+    text = output(tui)
+    assert 'Failed to parse addon data: Addon100.\nDownloaded file is not a valid ZIP archive.' in text
+    assert 'Refused:' not in text
+    assert 'Traceback' not in text
