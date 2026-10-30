@@ -14,7 +14,11 @@ MAX_MEMBERS = 20000
 MAX_UNCOMPRESSED_BYTES = 1024 * 1024 * 1024
 MAX_RATIO = 200
 RATIO_MIN_BYTES = 1024 * 1024
+MAX_LOCKED_VERSIONS = 50
 INSECURE_ENV = 'CURSEBREAKER_INSECURE_SKIP_VERIFY'
+WOWI_PREFIX = 'https://www.wowinterface.com/downloads/'
+GITHUB_PREFIX = 'https://github.com/'
+WAGO_PREFIX = 'https://addons.wago.io/addons/'
 
 
 @dataclass
@@ -160,8 +164,36 @@ def is_downgrade(old, new):
         return False
 
 
-def lock_mismatch(lock, version, sha256):
-    return bool(lock and lock.get('Version') == version and lock.get('SHA256') and lock['SHA256'] != sha256)
+def source_key(url):
+    if url.startswith(WOWI_PREFIX) and (ids := re.findall(r'\d+', url)):
+        return f'wowi:{ids[0]}'
+    if url.startswith(GITHUB_PREFIX):
+        return f'gh:{url[len(GITHUB_PREFIX):].lower()}'
+    if url.startswith(WAGO_PREFIX):
+        return f'wa:{url[len(WAGO_PREFIX):].lower()}'
+    return url.lower()
+
+
+def locked_sha256(history, url, version):
+    for locked_version, sha256 in history.get(source_key(url), []):
+        if locked_version == version:
+            return sha256
+    return None
+
+
+def remember_lock(history, url, version, sha256):
+    pairs = [pair for pair in history.get(source_key(url), []) if pair[0] != version]
+    pairs.append([version, sha256])
+    history[source_key(url)] = pairs[-MAX_LOCKED_VERSIONS:]
+
+
+def seed_lock_history(addons):
+    history = {}
+    for addon in addons:
+        lock = addon.get('Lock')
+        if lock and lock.get('SHA256'):
+            remember_lock(history, addon['URL'], lock['Version'], lock['SHA256'])
+    return history
 
 
 def summarize(records):

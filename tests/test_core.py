@@ -200,6 +200,67 @@ def test_tofu_insecure_env_allows_with_notice(core, wowi, addons, monkeypatch):
     assert any('publisher replaced the file' in notice for notice in core.notices)
 
 
+def reinstall_after_republish(core, wowi, addons, url='wowi:100', files=None):
+    wowi(100, '1.0', {'Foo/Foo.toc': 'x'})
+    core.add_addon('wowi:100', False)
+    core.del_addon(WOWI, False)
+    wowi(100, '1.0', files or {'Foo/Foo.toc': 'replaced'})
+    return core.add_addon(url, False)
+
+
+def test_lock_survives_uninstall_and_refuses_replaced_file(core, wowi, addons):
+    with pytest.raises(RuntimeError, match='replaced the file'):
+        reinstall_after_republish(core, wowi, addons)
+    assert tree(addons) == []
+    assert core.config['Addons'] == []
+
+
+def test_lock_survives_uninstall_and_allows_identical_file(core, wowi, addons):
+    assert reinstall_after_republish(core, wowi, addons, files={'Foo/Foo.toc': 'x'}) == (True, 'Addon100', '1.0')
+    assert (addons / 'Foo' / 'Foo.toc').read_text() == 'x'
+
+
+def test_lock_matches_the_same_source_under_another_url(core, wowi, addons):
+    wowi(100, '1.0', {'Foo/Foo.toc': 'x'})
+    core.add_addon('https://www.wowinterface.com/downloads/info100-Foo.html', False)
+    core.del_addon('https://www.wowinterface.com/downloads/info100-Foo.html', False)
+    wowi(100, '1.0', {'Foo/Foo.toc': 'replaced'})
+    with pytest.raises(RuntimeError, match='replaced the file'):
+        core.add_addon('wowi:100', False)
+    assert tree(addons) == []
+
+
+def test_lock_history_is_seeded_from_entries_of_an_older_config(core, wowi, addons):
+    wowi(100, '1.0', {'Foo/Foo.toc': 'x'})
+    core.add_addon('wowi:100', False)
+    del core.config['LockHistory']
+    core.del_addon(WOWI, False)
+    wowi(100, '1.0', {'Foo/Foo.toc': 'replaced'})
+    with pytest.raises(RuntimeError, match='replaced the file'):
+        core.add_addon('wowi:100', False)
+    assert tree(addons) == []
+
+
+def test_insecure_env_overrides_the_lock_and_updates_the_history(core, wowi, addons, monkeypatch):
+    wowi(100, '1.0', {'Foo/Foo.toc': 'x'})
+    core.add_addon('wowi:100', False)
+    core.del_addon(WOWI, False)
+    wowi(100, '1.0', {'Foo/Foo.toc': 'replaced'})
+    monkeypatch.setenv(Verify.INSECURE_ENV, '1')
+    core.add_addon('wowi:100', False)
+    assert any('publisher replaced the file' in notice for notice in core.notices)
+    monkeypatch.delenv(Verify.INSECURE_ENV)
+    core.del_addon(WOWI, False)
+    assert core.add_addon('wowi:100', False) == (True, 'Addon100', '1.0')
+    assert (addons / 'Foo' / 'Foo.toc').read_text() == 'replaced'
+
+
+def test_lock_history_is_saved(core, wowi, client_dir):
+    content = wowi(100, '1.0', {'Foo/Foo.toc': 'x'})
+    core.add_addon('wowi:100', False)
+    assert saved_config(client_dir)['LockHistory'] == {'wowi:100': [['1.0', sha256(content)]]}
+
+
 def test_insecure_env_allows_hash_mismatch_with_notice(core, wowi, addons, monkeypatch):
     monkeypatch.setenv(Verify.INSECURE_ENV, '1')
     wowi(100, '1.0', {'Foo/Foo.toc': 'x'}, uimd5='0' * 32)

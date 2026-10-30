@@ -170,12 +170,49 @@ def test_is_downgrade():
     assert not Verify.is_downgrade('abc1234', 'def5678')
 
 
-def test_lock_mismatch():
-    lock = {'Version': '1.0', 'SHA256': 'aa'}
-    assert Verify.lock_mismatch(lock, '1.0', 'bb')
-    assert not Verify.lock_mismatch(lock, '1.0', 'aa')
-    assert not Verify.lock_mismatch(lock, '1.1', 'bb')
-    assert not Verify.lock_mismatch(None, '1.0', 'bb')
+def test_source_key():
+    assert Verify.source_key('https://www.wowinterface.com/downloads/info100-Foo.html') == 'wowi:100'
+    assert Verify.source_key('https://www.wowinterface.com/downloads/info100.html') == 'wowi:100'
+    assert Verify.source_key('https://www.wowinterface.com/downloads/nodigits.html') == \
+        'https://www.wowinterface.com/downloads/nodigits.html'
+    assert Verify.source_key('https://github.com/Owner/Repo') == 'gh:owner/repo'
+    assert Verify.source_key('https://addons.wago.io/addons/Some-Addon') == 'wa:some-addon'
+    assert Verify.source_key('ElvUI') == 'elvui'
+    assert Verify.source_key('Raw:Dev') == 'raw:dev'
+
+
+def test_locked_sha256():
+    history = {'wowi:100': [['1.0', 'aa'], ['1.1', 'bb']]}
+    assert Verify.locked_sha256(history, 'https://www.wowinterface.com/downloads/info100.html', '1.1') == 'bb'
+    assert Verify.locked_sha256(history, 'https://www.wowinterface.com/downloads/info100.html', '2.0') is None
+    assert Verify.locked_sha256(history, 'https://www.wowinterface.com/downloads/info200.html', '1.0') is None
+    assert Verify.locked_sha256({}, 'elvui', '1.0') is None
+
+
+def test_remember_lock_replaces_a_re_recorded_version():
+    history = {}
+    Verify.remember_lock(history, 'ElvUI', '1.0', 'aa')
+    Verify.remember_lock(history, 'elvui', '1.1', 'bb')
+    Verify.remember_lock(history, 'elvui', '1.0', 'cc')
+    assert history == {'elvui': [['1.1', 'bb'], ['1.0', 'cc']]}
+
+
+def test_remember_lock_keeps_the_newest_versions():
+    history = {}
+    for number in range(Verify.MAX_LOCKED_VERSIONS + 5):
+        Verify.remember_lock(history, 'elvui', str(number), f'sha{number}')
+    pairs = history['elvui']
+    assert len(pairs) == Verify.MAX_LOCKED_VERSIONS
+    assert pairs[0] == ['5', 'sha5']
+    assert pairs[-1] == [str(Verify.MAX_LOCKED_VERSIONS + 4), f'sha{Verify.MAX_LOCKED_VERSIONS + 4}']
+
+
+def test_seed_lock_history_skips_entries_without_a_locked_hash():
+    addons = [{'URL': 'https://github.com/Owner/Repo', 'Lock': {'Version': '1.0', 'SHA256': 'aa'}},
+              {'URL': 'elvui'},
+              {'URL': 'tukui', 'Lock': {'Version': '2.0', 'SHA256': None}},
+              {'URL': 'raw:dev', 'Lock': {'Version': '3.0'}}]
+    assert Verify.seed_lock_history(addons) == {'gh:owner/repo': [['1.0', 'aa']]}
 
 
 def test_summarize():
