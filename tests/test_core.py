@@ -270,13 +270,15 @@ def test_forced_downgrade_to_a_republished_version_refused(core, wowi, addons):
 
 
 def test_insecure_env_overrides_the_lock_and_updates_the_history(core, wowi, addons, monkeypatch):
-    wowi(100, '1.0', {'Foo/Foo.toc': 'x'})
+    locked = wowi(100, '1.0', {'Foo/Foo.toc': 'x'})
     core.add_addon('wowi:100', False)
     core.del_addon(WOWI, False)
-    wowi(100, '1.0', {'Foo/Foo.toc': 'replaced'})
+    replaced = wowi(100, '1.0', {'Foo/Foo.toc': 'replaced'})
     monkeypatch.setenv(Verify.INSECURE_ENV, '1')
     core.add_addon('wowi:100', False)
-    assert any('publisher replaced the file' in notice for notice in core.notices)
+    assert core.notices[-1] == (f'WARNING: Addon100.\nThe publisher replaced the file for version 1.0.\n'
+                                f'Locked SHA256: {sha256(locked)}\nDownloaded SHA256: {sha256(replaced)}\n'
+                                'Installed anyway because CURSEBREAKER_INSECURE_SKIP_VERIFY=1.')
     monkeypatch.delenv(Verify.INSECURE_ENV)
     core.del_addon(WOWI, False)
     assert core.add_addon('wowi:100', False) == (True, 'Addon100', '1.0')
